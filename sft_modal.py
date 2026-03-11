@@ -42,7 +42,7 @@ METAMATHQA_SIZE = 50000
 ORCAMATH_SIZE = 50000
 ULTRACHAT_SIZE = 100000
 
-GPU = "H100:1"
+GPU = "A10G:1"  # ~$1.10/hr, sufficient for d8 picochat (~42M params)
 DEVICE_BATCH_SIZE = 4  # seq_len=2048 with total_batch_size=16384 → batch*seq must divide total
 TOTAL_BATCH_SIZE = 16384
 
