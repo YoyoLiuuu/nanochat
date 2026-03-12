@@ -42,7 +42,7 @@ METAMATHQA_SIZE = 50000
 ORCAMATH_SIZE = 50000
 ULTRACHAT_SIZE = 100000
 
-GPU = "A10G:1"  # ~$1.10/hr, sufficient for d8 picochat (~42M params)
+GPU = "H100:1"
 DEVICE_BATCH_SIZE = 4  # seq_len=2048 with total_batch_size=16384 → batch*seq must divide total
 TOTAL_BATCH_SIZE = 16384
 
@@ -139,17 +139,48 @@ def _download_identity_conversations() -> None:
 def list_checkpoints() -> None:
     """List all checkpoints on the volume."""
     _setup_cache()
-    base_dir = os.path.join(NANOCHAT_CACHE, "base_checkpoints")
-    if not os.path.exists(base_dir):
-        print(f"No base_checkpoints directory at {base_dir}")
-        return
-    for entry in sorted(os.listdir(base_dir)):
-        full = os.path.join(base_dir, entry)
-        if os.path.isdir(full):
-            files = os.listdir(full)
-            print(f"  {entry}/ ({len(files)} files): {files[:5]}")
-        else:
-            print(f"  {entry}")
+    import json as _json
+    import shutil as _shutil
+
+    # Move SFT checkpoints into a4p2_checkpoints if they exist
+    sft_dir = os.path.join(NANOCHAT_CACHE, "chatsft_checkpoints")
+    a4p2_dir = os.path.join(NANOCHAT_CACHE, "a4p2_checkpoints")
+    if os.path.exists(sft_dir):
+        for tag in ["sft-baseline", "sft-enhanced"]:
+            src = os.path.join(sft_dir, tag)
+            dst = os.path.join(a4p2_dir, tag)
+            if os.path.exists(src) and not os.path.exists(dst):
+                os.makedirs(a4p2_dir, exist_ok=True)
+                _shutil.move(src, dst)
+                print(f"Moved {src} -> {dst}")
+        # Clean up lora checkpoints
+        for tag in ["sft-lora-baseline", "sft-lora-enhanced"]:
+            lora_path = os.path.join(sft_dir, tag)
+            if os.path.exists(lora_path):
+                _shutil.rmtree(lora_path)
+                print(f"Deleted {lora_path}")
+        volume.commit()
+
+    for subdir in ["base_checkpoints", "chatsft_checkpoints", "a4p2_checkpoints"]:
+        base_dir = os.path.join(NANOCHAT_CACHE, subdir)
+        print(f"\n{subdir}/")
+        if not os.path.exists(base_dir):
+            print("  (not found)")
+            continue
+        for entry in sorted(os.listdir(base_dir)):
+            full = os.path.join(base_dir, entry)
+            if os.path.isdir(full):
+                files = sorted(os.listdir(full))
+                print(f"  {entry}/ ({len(files)} files): {files[:5]}")
+                # Print metadata from meta files
+                for f in files:
+                    if f.startswith("meta_") and f.endswith(".json"):
+                        meta_path = os.path.join(full, f)
+                        with open(meta_path) as mf:
+                            meta = _json.load(mf)
+                        print(f"    {f}: step={meta.get('step')}, val_bpb={meta.get('val_bpb')}")
+            else:
+                print(f"  {entry}")
 
 
 # =============================================================================
@@ -181,8 +212,8 @@ def stage_sft(
         f"--device-batch-size={DEVICE_BATCH_SIZE}",
         f"--total-batch-size={TOTAL_BATCH_SIZE}",
         f"--run={run_name}",
-        f"--chatcore-every=200",
-        f"--eval-every=200",
+        f"--chatcore-every=-1",
+        f"--eval-every=-1",
     ]
     if model_step is not None:
         args.append(f"--model-step={model_step}")
@@ -271,44 +302,38 @@ def run_sft_evals() -> None:
 @app.local_entrypoint()
 def main() -> None:
     """
-    Full SFT experiment pipeline:
-      1. Baseline SFT (original mixture)
-      2. Enhanced SFT (original + MetaMathQA + Orca-Math + UltraChat)
-      3. Evaluate both checkpoints
+    Launch both SFT runs in parallel. Use with: modal run --detach sft_modal.py::main
     """
-    print("\n" + "="*60)
-    print("SFT Data Mixture Experiment")
-    print("="*60 + "\n")
+    print("Spawning 2 SFT runs in parallel on H100s...")
 
-    print("[1/3] Baseline SFT (original mixture)...")
-    stage_sft.remote(
+    h1 = stage_sft.spawn(
         run_name="sft-baseline",
         model_tag=BASE_MODEL_TAG,
         sft_output_tag=BASELINE_SFT_TAG,
+        model_step=BASE_MODEL_STEP,
     )
+    print("  [1/2] Baseline FFT spawned")
 
-    print("[2/3] Enhanced SFT (original + MetaMathQA + Orca-Math + UltraChat)...")
-    stage_sft.remote(
+    h2 = stage_sft.spawn(
         run_name="sft-enhanced",
         model_tag=BASE_MODEL_TAG,
         sft_output_tag=ENHANCED_SFT_TAG,
+        model_step=BASE_MODEL_STEP,
         extra_args=[
             f"--metamathqa-size={METAMATHQA_SIZE}",
             f"--orcamath-size={ORCAMATH_SIZE}",
             f"--ultrachat-size={ULTRACHAT_SIZE}",
         ],
     )
+    print("  [2/2] Enhanced FFT spawned")
 
-    print("[3/3] Evaluating both SFT checkpoints...")
-    stage_chat_eval.remote(
-        run_name="eval-sft-baseline",
-        model_tag=BASELINE_SFT_TAG,
-    )
-    stage_chat_eval.remote(
-        run_name="eval-sft-enhanced",
-        model_tag=ENHANCED_SFT_TAG,
-    )
+    for i, h in enumerate([h1, h2], 1):
+        h.get()
+        print(f"  [{i}/2] complete")
 
-    print("\n" + "="*60)
-    print("All done! Check W&B for results.")
-    print("="*60 + "\n")
+    print("\nAll training done! Running evals...")
+    for tag in [BASELINE_SFT_TAG, ENHANCED_SFT_TAG]:
+        stage_chat_eval.remote(run_name=f"eval-{tag}", model_tag=tag)
+        print(f"  Eval {tag} complete")
+
+    print("\nAll done! Check W&B: https://wandb.ai/alvinay73-university-of-toronto/nanochat-sft")

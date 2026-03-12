@@ -16,3 +16,5 @@ wandb/
 *.pdf
 
 .*
+a4p2_checkpoints/*.pt
+a4p2_checkpoints/**/*.pt
