@@ -464,7 +464,8 @@ def run_remaining() -> None:
 
     print("[2/5] SFT enhanced...")
     _torchrun("scripts.chat_sft", [
-        f"--model-tag={PRETRAIN_MODEL_TAG}", f"--device-batch-size={DEVICE_BATCH_SIZE}", "--run=sft-enhanced-d24",
+        f"--model-tag={PRETRAIN_MODEL_TAG}", f"--device-batch-size={DEVICE_BATCH_SIZE}",
+        "--run=sft-enhanced-d24",
         f"--metamathqa-size={METAMATHQA_SIZE}", f"--orcamath-size={ORCAMATH_SIZE}", f"--ultrachat-size={ULTRACHAT_SIZE}",
     ], nproc=NPROC)
     src = os.path.join(NANOCHAT_CACHE, "chatsft_checkpoints", PRETRAIN_MODEL_TAG)
