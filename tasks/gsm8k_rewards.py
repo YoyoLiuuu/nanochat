@@ -14,51 +14,6 @@ from typing import Callable
 from tasks.gsm8k import extract_answer
 
 
-CALC_RE = re.compile(r"<<([^>]+)>>")
-ALLOWED_CALC_CHARS = set("0123456789*+-/.() ")
-
-
-def _safe_eval_arithmetic(expr: str):
-    expr = expr.replace(",", "")
-    if not expr:
-        return None
-    if "**" in expr:
-        return None
-    if not set(expr).issubset(ALLOWED_CALC_CHARS):
-        return None
-    try:
-        return eval(expr, {"__builtins__": {}}, {})
-    except Exception:
-        return None
-
-
-def _calc_consistency_score(text: str) -> float:
-    """
-    Score in [0, 1] for arithmetic consistency of <<expr=result>> snippets.
-    If there are no calculator snippets, returns 0.
-    """
-    snippets = CALC_RE.findall(text)
-    if not snippets:
-        return 0.0
-
-    num_valid = 0
-    for snippet in snippets:
-        if "=" not in snippet:
-            continue
-        expr, claimed = snippet.rsplit("=", 1)
-        actual = _safe_eval_arithmetic(expr.strip())
-        if actual is None:
-            continue
-        try:
-            claimed_float = float(claimed.strip().replace(",", ""))
-            actual_float = float(actual)
-        except Exception:
-            continue
-        if abs(actual_float - claimed_float) <= 1e-6:
-            num_valid += 1
-    return num_valid / max(len(snippets), 1)
-
-
 def reward_baseline(task, conversation, assistant_response: str):
     """Original nanochat reward: exact final-answer match (0/1)."""
     exact = float(task.evaluate(conversation, assistant_response))
@@ -71,11 +26,12 @@ def reward_numeric_distance(task, conversation, assistant_response: str):
     """
     Baseline + bounded numeric-distance shaping to the gold final answer.
 
-    - exact match: 1.0
-    - otherwise (if both numeric):
-        reward = 0.4 * exp(-|pred-ref| / (|ref| + 1))
-      which is in (0, 0.4]
-    - non-parseable/missing numeric answer: 0.0
+        - exact match: 1.0
+        - otherwise:
+                reward = 0.10 * parseable_hash_answer
+                             + 0.35 * exp(-|pred-ref| / (|ref| + 1))
+            where parseable_hash_answer is 1 if output has parseable #### number.
+        - non-parseable/missing numeric answer: only the parseable_hash term can apply.
 
     This is harder to reward-hack than formatting rewards because the signal is
     anchored directly to numeric closeness to the gold answer.
@@ -94,7 +50,9 @@ def reward_numeric_distance(task, conversation, assistant_response: str):
 
     if exact > 0.0:
         reward = 1.0
+        closeness = 1.0
     else:
+        closeness = 0.0
         try:
             if pred_num is None or ref_num is None:
                 raise ValueError("non-numeric")
@@ -102,47 +60,72 @@ def reward_numeric_distance(task, conversation, assistant_response: str):
             ref_val = float(ref_num)
             distance = abs(pred_val - ref_val)
             scale = abs(ref_val) + 1.0
-            reward = 0.4 * math.exp(-distance / scale)
+            closeness = math.exp(-distance / scale)
         except Exception:
-            reward = 0.0
+            closeness = 0.0
+        reward = 0.10 * parseable + 0.35 * closeness
 
     return reward, {
         "exact_match": exact,
         "parseable_answer": parseable,
+        "numeric_closeness": closeness,
     }
 
 
-def reward_calc_consistency(task, conversation, assistant_response: str):
+def reward_completion_brevity(task, conversation, assistant_response: str):
     """
-    Baseline + shaping from answer formatting and calculator consistency.
+    Baseline + shaping for answer completion and concise outputs.
 
     reward = 1.0 (if exact)
-           else 0.15 * parseable_answer + 0.35 * calc_consistency
+           else 0.20 * parseable_answer
+              + 0.10 * has_step_words
+              + 0.15 * brevity_score
 
-    This keeps exact-match as the dominant signal while giving denser
-    intermediate feedback on structured reasoning behavior.
+    brevity_score = 1.0 if output length <= 220
+                    linearly decays to 0.0 by length 520
+                    0.0 above 520
+
+    This targets the observed failure mode of long rambling outputs that never
+    finish with a usable answer marker.
     """
     exact = float(task.evaluate(conversation, assistant_response))
     pred_num = extract_answer(assistant_response)
     parseable = float(pred_num is not None)
-    calc_consistency = _calc_consistency_score(assistant_response)
+    length = len(assistant_response)
+    low, high = 220, 520
+    if length <= low:
+        brevity_score = 1.0
+    elif length >= high:
+        brevity_score = 0.0
+    else:
+        brevity_score = 1.0 - ((length - low) / (high - low))
+
+    has_step_words = float(
+        bool(
+            re.search(
+                r"\b(first|then|therefore|so|total|finally)\b",
+                assistant_response.lower(),
+            )
+        )
+    )
 
     if exact > 0.0:
         reward = 1.0
     else:
-        reward = 0.15 * parseable + 0.35 * calc_consistency
+        reward = 0.20 * parseable + 0.10 * has_step_words + 0.15 * brevity_score
 
     return reward, {
         "exact_match": exact,
         "parseable_answer": parseable,
-        "calc_consistency": calc_consistency,
+        "brevity_score": brevity_score,
+        "has_step_words": has_step_words,
     }
 
 
 REWARD_SYSTEMS: dict[str, Callable] = {
     "baseline": reward_baseline,
     "numeric_distance": reward_numeric_distance,
-    "calc_consistency": reward_calc_consistency,
+    "completion_brevity": reward_completion_brevity,
 }
 
 

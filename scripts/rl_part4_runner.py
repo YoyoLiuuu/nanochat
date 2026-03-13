@@ -75,7 +75,7 @@ def main():
     parser.add_argument(
         "--reward-systems",
         type=str,
-        default="baseline,numeric_distance,calc_consistency",
+        default="baseline,numeric_distance,completion_brevity",
     )
     parser.add_argument(
         "--launcher", type=str, default="python", choices=["python", "torchrun"]

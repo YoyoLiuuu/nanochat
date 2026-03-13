@@ -196,7 +196,7 @@ This avoids accidental overwrites and makes side-by-side comparison easier.
 
 Use your **Part 3 run** as baseline (`rl-gsm8k-teammate`) and run only the 2 additional reward systems for Part 4:
 1. `numeric_distance` (J)
-2. `calc_consistency` (K)
+2. `completion_brevity` (K)
 
 This halves wall-clock time because J and K train in parallel on separate Modal jobs.
 
@@ -210,7 +210,7 @@ uv run modal run --detach nanochat_modal.py::run_rl_part4_j
 ### K commands
 
 ```bash
-# Run K's Part 4 training on Modal (calc_consistency reward)
+# Run K's Part 4 training on Modal (completion_brevity reward)
 uv run modal run --detach nanochat_modal.py::run_rl_part4_k
 ```
 
@@ -245,9 +245,9 @@ Notebook outputs (plots + CSVs) can be exported from `dev/rl_gsm8k_part4_analysi
 ### Reward function descriptions
 `baseline` (`reward_baseline`) is the **original** nanochat-style GSM8K reward: strict binary exact match on the final extracted answer. If the model’s #### answer matches the reference exactly, reward is 1.0; otherwise 0.0. This keeps the optimization target tightly aligned with benchmark accuracy and is the clean control/baseline for your ablations.
 
-`numeric_distance` (`reward_numeric_distance`) keeps exact-match dominant (1.0), but for incorrect numeric answers it gives bounded partial credit based on distance to the gold answer: `0.4 * exp(-|pred-ref| / (|ref|+1))`. This creates denser learning signal than strict 0/1 while being less hackable than format-only rewards because it is anchored to numeric correctness.
+`numeric_distance` (`reward_numeric_distance`) keeps exact-match dominant (1.0), and for incorrect outputs adds bounded shaping from two pieces: a small bonus for parseable `#### N` answer format plus a numeric-closeness term (`exp(-|pred-ref| / (|ref|+1))`). This gives denser signal while staying anchored to the final numeric target.
 
-`calc_consistency` (`reward_calc_consistency`) also keeps exact-match dominant (1.0 when correct), but otherwise gives shaped reward from two intermediate signals: parseable final answer and internal arithmetic consistency of <<expr=result>> snippets. For non-exact outputs, reward is 0.15 * parseable_answer + 0.35 * calc_consistency, where calc_consistency is the fraction of calculator snippets that evaluate correctly. This is intended to encourage structured reasoning behavior and more consistent intermediate math, not just final formatting.
+`completion_brevity` (`reward_completion_brevity`) targets the Part 3 failure mode of long rambling outputs that never finish. It keeps exact-match dominant (1.0), and otherwise rewards parseable completion (`#### N`), presence of simple step words (e.g., “first”, “then”), and concise length via a bounded brevity score that decays for very long outputs.
 
 ---
 
@@ -257,24 +257,24 @@ Notebook outputs (plots + CSVs) can be exported from `dev/rl_gsm8k_part4_analysi
   - Defines reward systems used by RL:
     - `baseline`
     - `numeric_distance` 
-    - `calc_consistency`
+    - `completion_brevity`
   - Exposes `get_reward_fn(...)` to select reward by name.
 
 - `scripts/chat_rl.py`
   - Adds `--reward-system` CLI flag.
   - Selects reward function from `tasks/gsm8k_rewards.py`.
-  - Logs reward component metrics (e.g., `exact_match`, `parseable_answer`, `calc_consistency`) to W&B.
+  - Logs reward component metrics (e.g., `exact_match`, `parseable_answer`, `numeric_closeness`, `brevity_score`) to W&B.
 
 - `nanochat_modal.py`
   - Passes `--reward-system` into RL training stage.
   - Adds Modal-only Part 4 entrypoints:
     - `run_rl_part4_j` → `numeric_distance`
-    - `run_rl_part4_k` → `calc_consistency`
+    - `run_rl_part4_k` → `completion_brevity`
   - Keeps SFT init aligned with teammate checkpoint settings.
 
 - `dev/rl_gsm8k_part4_analysis.ipynb`
   - Notebook-first Part 4 analysis (same style as Part 3).
-  - Compares baseline vs `numeric_distance` vs `calc_consistency` from downloaded eval logs.
+  - Compares baseline vs `numeric_distance` vs `completion_brevity` from downloaded eval logs.
   - Produces plots/tables and writeup-ready observations.
 
 - `scripts/rl_part4_runner.py`

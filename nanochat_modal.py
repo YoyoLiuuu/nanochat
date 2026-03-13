@@ -782,7 +782,7 @@ def run_rl_part4_j() -> None:
 @app.local_entrypoint()
 def run_rl_part4_k() -> None:
     """
-    Part 4 run for K on Modal: additional reward system #2 (calc_consistency).
+    Part 4 run for K on Modal: additional reward system #2 (completion_brevity).
 
     Run:
         uv run modal run --detach nanochat_modal.py::run_rl_part4_k
@@ -793,10 +793,10 @@ def run_rl_part4_k() -> None:
         step=TEAMMATE_STEP or 0,
     )
     stage_rl_d12.remote(
-        run_name="rl-gsm8k-part4-teammate-k-calc_consistency",
+        run_name="rl-gsm8k-part4-teammate-k-completion_brevity",
         model_tag=TEAMMATE_CHECKPOINT,
         model_step=TEAMMATE_STEP,
-        reward_system="calc_consistency",
+        reward_system="completion_brevity",
         num_epochs=TEAMMATE_EPOCHS,
         device_batch_size=TEAMMATE_DEVICE_BATCH,
         examples_per_step=TEAMMATE_EXAMPLES_STEP,
@@ -844,7 +844,7 @@ def download_eval_logs_part4() -> None:
     run_names = [
         TEAMMATE_RUN_NAME,
         "rl-gsm8k-part4-teammate-j-numeric_distance",
-        "rl-gsm8k-part4-teammate-k-calc_consistency",
+        "rl-gsm8k-part4-teammate-k-completion_brevity",
     ]
 
     for run_name in run_names:
