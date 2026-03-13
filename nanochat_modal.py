@@ -718,22 +718,22 @@ TEAMMATE_MAX_NEW_TOKENS = 512
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@app.local_entrypoint()
-def run_rl_teammate() -> None:
-    """
-    Step 1: download SFT checkpoint from HuggingFace to the Modal volume.
-    Step 2: run RL training.
-
-    Edit TEAMMATE_* constants above, then:
-        uv run modal run --detach nanochat_modal.py::run_rl_teammate
-    """
-    # Download checkpoint from HuggingFace
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    cpu=2,
+    timeout=60 * 60 * 24,
+)
+def stage_rl_teammate_pipeline() -> None:
+    """Download SFT checkpoint then run RL — runs entirely on Modal servers."""
+    # Step 1: download
     stage_download_sft_checkpoint.remote(
         hf_repo=TEAMMATE_HF_REPO,
         checkpoint_name=TEAMMATE_CHECKPOINT,
-        step=TEAMMATE_STEP or 0,   # 0 triggers auto-detect inside stage_download
+        step=TEAMMATE_STEP or 0,
     )
-    # Run RL on H100:4 (same as stage_rl_d12 but with teammate config)
+    # Step 2: train
     stage_rl_d12.remote(
         run_name=TEAMMATE_RUN_NAME,
         model_tag=TEAMMATE_CHECKPOINT,
@@ -747,6 +747,15 @@ def run_rl_teammate() -> None:
         eval_examples=400,
         save_every=60,
     )
+
+
+@app.local_entrypoint()
+def run_rl_teammate() -> None:
+    """
+    Edit TEAMMATE_* constants above, then:
+        uv run modal run --detach nanochat_modal.py::run_rl_teammate
+    """
+    stage_rl_teammate_pipeline.remote()
 
 
 @app.local_entrypoint()
