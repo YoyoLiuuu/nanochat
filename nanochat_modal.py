@@ -210,17 +210,40 @@ def stage_data(num_shards: int = NUM_SHARDS) -> None:
     gpu="A10G:1",
     timeout=60 * 30,
 )
-def stage_tokenizer() -> None:
+def stage_tokenizer(run_eval: bool = True) -> None:
     """Train the BPE tokenizer (1 GPU, ~2 min — runs once for all ablations)."""
+    import pickle
+
     _setup_cache()
-    tokenizer_path = os.path.join(NANOCHAT_CACHE, "tokenizer.model")
-    if os.path.exists(tokenizer_path):
+    tokenizer_dir = os.path.join(NANOCHAT_CACHE, "tokenizer")
+    tokenizer_pickle_path = os.path.join(tokenizer_dir, "tokenizer.pkl")
+    token_bytes_path = os.path.join(tokenizer_dir, "token_bytes.pt")
+
+    tokenizer_ready = False
+    if os.path.exists(tokenizer_pickle_path) and os.path.exists(token_bytes_path):
+        try:
+            with open(tokenizer_pickle_path, "rb") as f:
+                enc = pickle.load(f)
+            if getattr(enc, "n_vocab", 0) == 32768:
+                tokenizer_ready = True
+            else:
+                print(
+                    f"Found tokenizer.pkl with unexpected vocab size: {getattr(enc, 'n_vocab', 'unknown')} (expected 32768). Retraining..."
+                )
+        except Exception as e:
+            print(
+                f"Found tokenizer artifacts but failed to validate them ({e}). Retraining..."
+            )
+
+    if tokenizer_ready:
         print("Tokenizer already exists, skipping.")
     else:
         print("Training tokenizer on 2B chars...")
         _python("scripts.tok_train", ["--max-chars=2000000000"])
         volume.commit()
-    _python("scripts.tok_eval")
+
+    if run_eval:
+        _python("scripts.tok_eval")
 
 
 # =============================================================================
@@ -735,6 +758,10 @@ def run_rl_teammate() -> None:
     Edit TEAMMATE_* constants above, then:
         uv run modal run --detach nanochat_modal.py::run_rl_teammate
     """
+    # Ensure data + tokenizer artifacts exist on volume (needed by get_tokenizer during model load)
+    stage_data.remote(num_shards=NUM_SHARDS)
+    stage_tokenizer.remote(run_eval=False)
+
     # Download checkpoint from HuggingFace
     stage_download_sft_checkpoint.remote(
         hf_repo=TEAMMATE_HF_REPO,
@@ -767,6 +794,9 @@ def run_rl_part4_j() -> None:
     Run:
         uv run modal run --detach nanochat_modal.py::run_rl_part4_j
     """
+    stage_data.remote(num_shards=NUM_SHARDS)
+    stage_tokenizer.remote(run_eval=False)
+
     stage_download_sft_checkpoint.remote(
         hf_repo=TEAMMATE_HF_REPO,
         checkpoint_name=TEAMMATE_CHECKPOINT,
@@ -797,6 +827,9 @@ def run_rl_part4_k() -> None:
     Run:
         uv run modal run --detach nanochat_modal.py::run_rl_part4_k
     """
+    stage_data.remote(num_shards=NUM_SHARDS)
+    stage_tokenizer.remote(run_eval=False)
+
     stage_download_sft_checkpoint.remote(
         hf_repo=TEAMMATE_HF_REPO,
         checkpoint_name=TEAMMATE_CHECKPOINT,
