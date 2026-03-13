@@ -706,7 +706,7 @@ def run_rl_gsm8k_d12() -> None:
 
 # ── Fill these in before running ─────────────────────────────────────────────
 TEAMMATE_HF_REPO        = "alvina-yang/csc490a4p2"   # HuggingFace repo
-TEAMMATE_CHECKPOINT     = "sft-teammate"              # folder name in the HF repo (d24 SFT baseline)
+TEAMMATE_CHECKPOINT     = "sft-baseline-d24"          # folder name in the HF repo
 TEAMMATE_STEP           = 483                         # sft-baseline-d24 step
 TEAMMATE_RUN_NAME       = "rl-gsm8k-teammate"        # W&B run name + eval log folder
 TEAMMATE_GPU            = "H100:2"                   # 2x H100 as requested
