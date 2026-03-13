@@ -72,7 +72,7 @@ VOLUME_MOUNT = "/vol"
 NANOCHAT_CACHE = f"{VOLUME_MOUNT}/nanochat_cache"
 
 # ── Timeouts ──────────────────────────────────────────────────────────────────
-TRAIN_TIMEOUT_SEC  = 60 * 60 * 4   # 4h max per picochat run (safe margin)
+TRAIN_TIMEOUT_SEC  = 60 * 60 * 20  # 20h max for RL runs
 DOWNLOAD_TIMEOUT_SEC = 60 * 60     # 1h for data download
 
 # ── Eval toggle ──────────────────────────────────────────────────────────────
@@ -535,7 +535,7 @@ def stage_rl(
     image=image,
     secrets=[secret],
     volumes={VOLUME_MOUNT: volume},
-    gpu="H100:2",
+    gpu="H100:8",
     timeout=TRAIN_TIMEOUT_SEC,
 )
 def stage_rl_d12(
@@ -574,7 +574,7 @@ def stage_rl_d12(
             f"--eval-examples={eval_examples}",
             f"--save-every={save_every}",
         ],
-        nproc=2,
+        nproc=8,
     )
     volume.commit()
     print(f"Done: {run_name}")
@@ -675,8 +675,8 @@ def run_rl_gsm8k_d12() -> None:
 TEAMMATE_HF_REPO        = "alvina-yang/csc490a4p2"   # HuggingFace repo
 TEAMMATE_CHECKPOINT     = "sft-teammate"              # folder name in the HF repo (d24 SFT baseline)
 TEAMMATE_STEP           = 483                         # sft-baseline-d24 step
-TEAMMATE_RUN_NAME       = "rl-gsm8k-teammate"        # W&B run name + eval log folder
-TEAMMATE_GPU            = "H100:2"                   # 2x H100 as requested
+TEAMMATE_RUN_NAME       = "rl-gsm8k-teammate-8gpu"   # W&B run name + eval log folder
+TEAMMATE_GPU            = "H100:8"                   # 8x H100 for speed
 TEAMMATE_EPOCHS         = 1
 TEAMMATE_DEVICE_BATCH   = 8
 TEAMMATE_EXAMPLES_STEP  = 64
