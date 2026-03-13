@@ -6,6 +6,9 @@
 # Install uv if needed
 command -v uv &> /dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh
 
+# OR: Install uv if needed, then make it available in the current shell session
+command -v uv &> /dev/null || { curl -LsSf https://astral.sh/uv/install.sh | sh && source "$HOME/.local/bin/env"; }
+
 # Install all dependencies (including modal as dev dep)
 uv sync --dev
 
@@ -24,6 +27,9 @@ uv run maturin develop --release --manifest-path rustbpe/Cargo.toml
 ---
 
 ## Modal Setup (one-time)
+
+- Go to Modal, make an account
+- Apply credit to: https://modal.com/credits 
 
 ```bash
 # Authenticate with Modal (creates ~/.modal.toml)

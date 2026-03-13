@@ -177,3 +177,106 @@ For reference, Karpathy's original run (from nanochat discussions):
 - Sequence length may increase then stabilize as model learns to reason before answering
 
 Your results will depend on model size and SFT quality. Differences are expected and should be discussed in the writeup.
+
+---
+
+## Part 4 — Additional reward systems (J + K workflow)
+
+Part 4 reuses the **same SFT initialization as Part 3**:
+- `model-tag = sft-teammate`
+- `model-step = auto-detect` (leave unset unless you need a specific step)
+
+Runs are separated by `--owner` in W&B/log folders:
+- J runs: `rl-gsm8k-part4-teammate-j-*`
+- K runs: `rl-gsm8k-part4-teammate-k-*`
+
+This avoids accidental overwrites and makes side-by-side comparison easier.
+
+### Reward systems to run
+
+Use your **Part 3 run** as baseline (`rl-gsm8k-teammate`) and run only the 2 additional reward systems for Part 4:
+1. `numeric_distance` (J)
+2. `calc_consistency` (K)
+
+This halves wall-clock time because J and K train in parallel on separate Modal jobs.
+
+### J commands
+
+```bash
+# Run J's Part 4 training on Modal (numeric_distance reward)
+uv run modal run --detach nanochat_modal.py::run_rl_part4_j
+```
+
+### K commands
+
+```bash
+# Run K's Part 4 training on Modal (calc_consistency reward)
+uv run modal run --detach nanochat_modal.py::run_rl_part4_k
+```
+
+### Monitor both Modal jobs
+
+```bash
+# Open Modal app dashboard
+open https://modal.com/apps
+
+# Open W&B project
+open https://wandb.ai/yoyoliuuu/nanochat-rl
+```
+
+### Compare all runs and export tables/plots
+
+```bash
+uv run python -m scripts.rl_part4_analysis \
+  --runs rl-gsm8k-teammate,rl-gsm8k-part4-teammate-j-numeric_distance,rl-gsm8k-part4-teammate-k-calc_consistency
+```
+
+Outputs are written to `dev/part4_outputs/`:
+- `summary_table.csv`
+- `error_type_fractions.csv`
+- `passat1_curve.png`, `passat8_curve.png`
+- `error_type_fractions.png`
+
+### Task Division
+
+- **J**: run `run_rl_part4_j` on Modal, inspect reward curves and pass@k trends, draft commentary on training dynamics.
+- **K**: run `run_rl_part4_k` on Modal, inspect error-type changes and qualitative mistake patterns, draft commentary on error shifts.
+- **Both**: merge results into one final table + combined writeup.
+
+### Reward function descriptions
+`baseline` (`reward_baseline`) is the **original** nanochat-style GSM8K reward: strict binary exact match on the final extracted answer. If the model’s #### answer matches the reference exactly, reward is 1.0; otherwise 0.0. This keeps the optimization target tightly aligned with benchmark accuracy and is the clean control/baseline for your ablations.
+
+`numeric_distance` (`reward_numeric_distance`) keeps exact-match dominant (1.0), but for incorrect numeric answers it gives bounded partial credit based on distance to the gold answer: `0.4 * exp(-|pred-ref| / (|ref|+1))`. This creates denser learning signal than strict 0/1 while being less hackable than format-only rewards because it is anchored to numeric correctness.
+
+`calc_consistency` (`reward_calc_consistency`) also keeps exact-match dominant (1.0 when correct), but otherwise gives shaped reward from two intermediate signals: parseable final answer and internal arithmetic consistency of <<expr=result>> snippets. For non-exact outputs, reward is 0.15 * parseable_answer + 0.35 * calc_consistency, where calc_consistency is the fraction of calculator snippets that evaluate correctly. This is intended to encourage structured reasoning behavior and more consistent intermediate math, not just final formatting.
+
+---
+
+## Files changed for Part 4
+
+- `tasks/gsm8k_rewards.py`
+  - Defines reward systems used by RL:
+    - `baseline`
+    - `numeric_distance` 
+    - `calc_consistency`
+  - Exposes `get_reward_fn(...)` to select reward by name.
+
+- `scripts/chat_rl.py`
+  - Adds `--reward-system` CLI flag.
+  - Selects reward function from `tasks/gsm8k_rewards.py`.
+  - Logs reward component metrics (e.g., `exact_match`, `parseable_answer`, `calc_consistency`) to W&B.
+
+- `nanochat_modal.py`
+  - Passes `--reward-system` into RL training stage.
+  - Adds Modal-only Part 4 entrypoints:
+    - `run_rl_part4_j` → `numeric_distance`
+    - `run_rl_part4_k` → `calc_consistency`
+  - Keeps SFT init aligned with teammate checkpoint settings.
+
+- `scripts/rl_part4_analysis.py`
+  - Compares multiple runs from eval JSON logs.
+  - Exports summary tables + plots for Part 4 writeup.
+
+- `scripts/rl_part4_runner.py`
+  - Convenience local runner for standardized reward ablations.
+  - Not needed when using `nanochat_modal.py` entrypoints on Modal.
