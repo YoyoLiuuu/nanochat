@@ -82,7 +82,7 @@ parser.add_argument(
     "--max-new-tokens", type=int, default=256, help="max tokens to generate per sample"
 )
 parser.add_argument(
-    "--temperature", type=float, default=1.0, help="sampling temperature"
+    "--temperature", type=float, default=0.7, help="sampling temperature"
 )
 parser.add_argument(
     "--top-k", type=int, default=50, help="top-k sampling (0 = disabled)"
@@ -255,6 +255,10 @@ def get_batch():
         # NOTE also that the Engine returns mask=0 for BOTH the prompt tokens AND the tool use tokens.
         # So we will (correctly) end up not training on the prompt tokens, or the tool use forced tokens.
         rewards = torch.tensor(rewards, dtype=torch.float, device=device)
+        if rewards.numel() > 0 and torch.allclose(rewards, rewards[:1]):
+            print0(
+                f"Warning: zero reward variance for example_idx={example_idx}, step={step}, mean_reward={rewards.mean().item():.6f}"
+            )
         # Calculate the advantages by simply subtracting the mean (instead of z-score (x-mu)/sigma)
         mu = rewards.mean()
         advantages = rewards - mu

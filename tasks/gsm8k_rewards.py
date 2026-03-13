@@ -14,6 +14,25 @@ from typing import Callable
 from tasks.gsm8k import extract_answer
 
 
+_ANY_NUMBER_RE = re.compile(r"[-+]?\d{1,3}(?:,\d{3})*(?:\.\d+)?|[-+]?\d+(?:\.\d+)?")
+
+
+def _extract_numeric_fallback(text: str) -> str | None:
+    """
+    Fallback numeric extractor used for reward shaping only.
+    Priority:
+      1) official GSM8K '#### <num>' extraction
+      2) last numeric literal anywhere in the output
+    """
+    strict = extract_answer(text)
+    if strict is not None:
+        return strict
+    matches = _ANY_NUMBER_RE.findall(text or "")
+    if not matches:
+        return None
+    return matches[-1].replace(",", "")
+
+
 def reward_baseline(task, conversation, assistant_response: str):
     """Original nanochat reward: exact final-answer match (0/1)."""
     exact = float(task.evaluate(conversation, assistant_response))
@@ -30,7 +49,8 @@ def reward_numeric_distance(task, conversation, assistant_response: str):
         - otherwise:
                 reward = 0.10 * parseable_hash_answer
                              + 0.35 * exp(-|pred-ref| / (|ref| + 1))
-            where parseable_hash_answer is 1 if output has parseable #### number.
+            where parseable_hash_answer is 1 if output has a parseable numeric answer
+            (#### marker preferred, numeric fallback accepted).
         - non-parseable/missing numeric answer: only the parseable_hash term can apply.
 
     This is harder to reward-hack than formatting rewards because the signal is
@@ -45,7 +65,7 @@ def reward_numeric_distance(task, conversation, assistant_response: str):
     ref_text = assistant_message["content"][-1]["text"]
     ref_num = extract_answer(ref_text)
 
-    pred_num = extract_answer(assistant_response)
+    pred_num = _extract_numeric_fallback(assistant_response)
     parseable = float(pred_num is not None)
 
     if exact > 0.0:
@@ -89,7 +109,7 @@ def reward_completion_brevity(task, conversation, assistant_response: str):
     finish with a usable answer marker.
     """
     exact = float(task.evaluate(conversation, assistant_response))
-    pred_num = extract_answer(assistant_response)
+    pred_num = _extract_numeric_fallback(assistant_response)
     parseable = float(pred_num is not None)
     length = len(assistant_response)
     low, high = 220, 520
