@@ -81,7 +81,7 @@ NANOCHAT_CACHE = f"{VOLUME_MOUNT}/nanochat_cache"
 TRAIN_TIMEOUT_SEC = 60 * 60 * 4  # 4h max per picochat run (safe margin)
 DOWNLOAD_TIMEOUT_SEC = 60 * 60  # 1h for data download
 
-# ── Teammate RL config for part 4 ───────────────────────────────────────────────────────
+# ── Teammate RL config for part 3 and 4 ───────────────────────────────────────────────────────
 TEAMMATE_HF_REPO = "alvina-yang/csc490a4p2"
 TEAMMATE_CHECKPOINT = "sft-baseline-d24"
 TEAMMATE_STEP = 483
@@ -93,8 +93,6 @@ TEAMMATE_EXAMPLES_STEP = 64
 TEAMMATE_NUM_SAMPLES = 8
 TEAMMATE_MAX_NEW_TOKENS = 512
 TEAMMATE_REWARD_SYSTEM = "baseline"
-PART4_EVAL_EXAMPLES = 200
-PART4_SAVE_EVERY = 20
 
 # ── Eval toggle ──────────────────────────────────────────────────────────────
 # CORE metric is expensive (~20-40min). Set to -1 to skip during ablation.
@@ -763,6 +761,7 @@ def run_rl_teammate() -> None:
 @app.local_entrypoint()
 def run_rl_part4_j() -> None:
     """
+    Exact same as run_rl_teammate but with J's params
     Part 4 run for J on Modal: additional reward system #1 (numeric_distance).
 
     Run:
@@ -784,14 +783,15 @@ def run_rl_part4_j() -> None:
         num_samples=TEAMMATE_NUM_SAMPLES,
         max_new_tokens=TEAMMATE_MAX_NEW_TOKENS,
         eval_every=60,
-        eval_examples=PART4_EVAL_EXAMPLES,
-        save_every=PART4_SAVE_EVERY,
+        eval_examples=400,
+        save_every=60,
     )
 
 
 @app.local_entrypoint()
 def run_rl_part4_k() -> None:
     """
+    Exact same as run_rl_teammate but with K's params
     Part 4 run for K on Modal: additional reward system #2 (completion_brevity).
 
     Run:
@@ -813,8 +813,8 @@ def run_rl_part4_k() -> None:
         num_samples=TEAMMATE_NUM_SAMPLES,
         max_new_tokens=TEAMMATE_MAX_NEW_TOKENS,
         eval_every=60,
-        eval_examples=PART4_EVAL_EXAMPLES,
-        save_every=PART4_SAVE_EVERY,
+        eval_examples=400,
+        save_every=60,
     )
 
 
