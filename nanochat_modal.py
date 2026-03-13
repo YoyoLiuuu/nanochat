@@ -83,7 +83,7 @@ DOWNLOAD_TIMEOUT_SEC = 60 * 60  # 1h for data download
 
 # ── Teammate RL config for part 4 ───────────────────────────────────────────────────────
 TEAMMATE_HF_REPO = "alvina-yang/csc490a4p2"
-TEAMMATE_CHECKPOINT = "sft-teammate"
+TEAMMATE_CHECKPOINT = "sft-baseline-d24"
 TEAMMATE_STEP = 483
 TEAMMATE_RUN_NAME = "rl-gsm8k-teammate"
 TEAMMATE_GPU = "H100:2"
