@@ -227,15 +227,14 @@ open https://wandb.ai/yoyoliuuu/nanochat-rl
 ### Compare all runs and export tables/plots
 
 ```bash
-uv run python -m scripts.rl_part4_analysis \
-  --runs rl-gsm8k-teammate,rl-gsm8k-part4-teammate-j-numeric_distance,rl-gsm8k-part4-teammate-k-calc_consistency
+# 1) Download baseline + Part 4 eval logs from Modal to local ./eval_logs/
+uv run modal run nanochat_modal.py::download_eval_logs_part4
+
+# 2) Open notebook analysis (same style as Part 3)
+code dev/rl_gsm8k_part4_analysis.ipynb
 ```
 
-Outputs are written to `dev/part4_outputs/`:
-- `summary_table.csv`
-- `error_type_fractions.csv`
-- `passat1_curve.png`, `passat8_curve.png`
-- `error_type_fractions.png`
+Notebook outputs (plots + CSVs) can be exported from `dev/rl_gsm8k_part4_analysis.ipynb`, mirroring Part 3 workflow.
 
 ### Task Division
 
@@ -273,9 +272,10 @@ Outputs are written to `dev/part4_outputs/`:
     - `run_rl_part4_k` → `calc_consistency`
   - Keeps SFT init aligned with teammate checkpoint settings.
 
-- `scripts/rl_part4_analysis.py`
-  - Compares multiple runs from eval JSON logs.
-  - Exports summary tables + plots for Part 4 writeup.
+- `dev/rl_gsm8k_part4_analysis.ipynb`
+  - Notebook-first Part 4 analysis (same style as Part 3).
+  - Compares baseline vs `numeric_distance` vs `calc_consistency` from downloaded eval logs.
+  - Produces plots/tables and writeup-ready observations.
 
 - `scripts/rl_part4_runner.py`
   - Convenience local runner for standardized reward ablations.

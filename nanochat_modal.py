@@ -811,11 +811,55 @@ def run_rl_part4_k() -> None:
 @app.local_entrypoint()
 def download_eval_logs() -> None:
     """
-    Download all eval log JSONs from the Modal volume to ./eval_logs/<run_name>/ locally.
-    Edit run_name below to match the run you want.
+    Download teammate baseline eval logs from Modal volume to local ./eval_logs/<run_name>/.
     Run: uv run modal run nanochat_modal.py::download_eval_logs
     """
-    _download_eval_logs.remote(run_name=TEAMMATE_RUN_NAME)
+    import json
+
+    run_name = TEAMMATE_RUN_NAME
+    payload = _download_eval_logs.remote(run_name=run_name)
+    if not payload:
+        print(f"No logs returned for run: {run_name}")
+        return
+
+    local_dir = os.path.join("eval_logs", run_name)
+    os.makedirs(local_dir, exist_ok=True)
+    for fname, data in payload.items():
+        out_path = os.path.join(local_dir, fname)
+        with open(out_path, "w") as f:
+            json.dump(data, f, indent=2)
+        print(f"Saved {out_path}")
+
+
+@app.local_entrypoint()
+def download_eval_logs_part4() -> None:
+    """
+    Download Part 4 eval logs for baseline + both reward systems to local ./eval_logs/.
+
+    Run:
+        uv run modal run nanochat_modal.py::download_eval_logs_part4
+    """
+    import json
+
+    run_names = [
+        TEAMMATE_RUN_NAME,
+        "rl-gsm8k-part4-teammate-j-numeric_distance",
+        "rl-gsm8k-part4-teammate-k-calc_consistency",
+    ]
+
+    for run_name in run_names:
+        payload = _download_eval_logs.remote(run_name=run_name)
+        if not payload:
+            print(f"No logs returned for run: {run_name}")
+            continue
+
+        local_dir = os.path.join("eval_logs", run_name)
+        os.makedirs(local_dir, exist_ok=True)
+        for fname, data in payload.items():
+            out_path = os.path.join(local_dir, fname)
+            with open(out_path, "w") as f:
+                json.dump(data, f, indent=2)
+            print(f"Saved {out_path}")
 
 
 @app.function(
