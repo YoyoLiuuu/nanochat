@@ -133,7 +133,7 @@ parser.add_argument(
     "--reward-system",
     type=str,
     default="baseline",
-    choices=["baseline", "numeric_distance", "completion_brevity"],
+    choices=["baseline", "numeric_distance", "completion_brevity", "combined"],
     help="reward shaping function for RL",
 )
 args = parser.parse_args()

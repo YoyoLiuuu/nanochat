@@ -78,13 +78,14 @@ VOLUME_MOUNT = "/vol"
 NANOCHAT_CACHE = f"{VOLUME_MOUNT}/nanochat_cache"
 
 # ── Timeouts ──────────────────────────────────────────────────────────────────
-TRAIN_TIMEOUT_SEC = 60 * 60 * 4  # 4h max per picochat run (safe margin)
+TRAIN_TIMEOUT_SEC = 60 * 60 * 10  # 10h max per run
 DOWNLOAD_TIMEOUT_SEC = 60 * 60  # 1h for data download
 
 # ── Teammate RL config for part 3 and 4 ───────────────────────────────────────────────────────
 TEAMMATE_HF_REPO = "alvina-yang/csc490a4p2"
 TEAMMATE_CHECKPOINT = "sft-baseline-d24"
 TEAMMATE_STEP = 483
+TEAMMATE_TOKENIZER_PATH = "tokenizer"
 TEAMMATE_RUN_NAME = "rl-gsm8k-teammate"
 TEAMMATE_GPU = "H100:2"
 TEAMMATE_EPOCHS = 1
@@ -514,6 +515,71 @@ def stage_download_sft_checkpoint(
     print(f"Volume committed. Checkpoint: {checkpoint_name} step={step}")
 
 
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    cpu=2,
+    timeout=60 * 15,
+)
+def stage_sync_tokenizer_from_hf(
+    hf_repo: str = TEAMMATE_HF_REPO,
+    tokenizer_path: str = TEAMMATE_TOKENIZER_PATH,
+    checkpoint_name: str = TEAMMATE_CHECKPOINT,
+) -> bool:
+    """Download tokenizer artifacts from HF repo to avoid checkpoint/tokenizer mismatch.
+
+    Returns True if tokenizer files were downloaded/found, False otherwise.
+    """
+    import urllib.request
+
+    tokenizer_dir = f"{NANOCHAT_CACHE}/tokenizer"
+    os.makedirs(tokenizer_dir, exist_ok=True)
+
+    targets = {
+        "tokenizer.pkl": os.path.join(tokenizer_dir, "tokenizer.pkl"),
+        "token_bytes.pt": os.path.join(tokenizer_dir, "token_bytes.pt"),
+    }
+
+    # Try common layouts used in teammates' HF repos.
+    candidate_prefixes = [
+        f"https://huggingface.co/{hf_repo}/resolve/main/{tokenizer_path}",
+        f"https://huggingface.co/{hf_repo}/resolve/main/{checkpoint_name}/{tokenizer_path}",
+        f"https://huggingface.co/{hf_repo}/resolve/main/{checkpoint_name}",
+        f"https://huggingface.co/{hf_repo}/resolve/main",
+    ]
+
+    downloaded = 0
+    for fname, dest in targets.items():
+        tmp_dest = dest + ".tmp"
+        if os.path.exists(tmp_dest):
+            os.remove(tmp_dest)
+        for prefix in candidate_prefixes:
+            url = f"{prefix}/{fname}"
+            try:
+                print(f"Trying tokenizer URL: {url}")
+                urllib.request.urlretrieve(url, tmp_dest)
+                os.replace(tmp_dest, dest)
+                print(f"  Downloaded {fname} -> {dest}")
+                downloaded += 1
+                break
+            except Exception:
+                if os.path.exists(tmp_dest):
+                    os.remove(tmp_dest)
+
+    ok = downloaded == len(targets)
+    if ok:
+        volume.commit()
+        print("Tokenizer sync complete.")
+        return True
+
+    print(
+        "Tokenizer sync from HF did not find all required files. "
+        "Expected tokenizer.pkl and token_bytes.pt."
+    )
+    return False
+
+
 @app.local_entrypoint()
 def download_sft_checkpoint() -> None:
     """Download sft-baseline (d8) checkpoint from HuggingFace to the Modal volume."""
@@ -762,9 +828,20 @@ def run_rl_teammate() -> None:
     Edit TEAMMATE_* constants above, then:
         uv run modal run --detach nanochat_modal.py::run_rl_teammate
     """
-    # Ensure data + tokenizer artifacts exist on volume (needed by get_tokenizer during model load)
+    # Ensure data artifacts exist on volume
     stage_data.remote(num_shards=NUM_SHARDS)
-    stage_tokenizer.remote(run_eval=False)
+    # Prefer teammate tokenizer from the same HF repo as the checkpoint.
+    # Fallback to local tokenizer training only if HF tokenizer files are unavailable.
+    tokenizer_ready = stage_sync_tokenizer_from_hf.remote(
+        hf_repo=TEAMMATE_HF_REPO,
+        tokenizer_path=TEAMMATE_TOKENIZER_PATH,
+        checkpoint_name=TEAMMATE_CHECKPOINT,
+    )
+    if not tokenizer_ready:
+        print(
+            "Falling back to local tokenizer training (may mismatch teammate checkpoint)."
+        )
+        stage_tokenizer.remote(run_eval=False)
 
     # Download checkpoint from HuggingFace
     stage_download_sft_checkpoint.remote(
@@ -799,7 +876,16 @@ def run_rl_part4_j() -> None:
         uv run modal run --detach nanochat_modal.py::run_rl_part4_j
     """
     stage_data.remote(num_shards=NUM_SHARDS)
-    stage_tokenizer.remote(run_eval=False)
+    tokenizer_ready = stage_sync_tokenizer_from_hf.remote(
+        hf_repo=TEAMMATE_HF_REPO,
+        tokenizer_path=TEAMMATE_TOKENIZER_PATH,
+        checkpoint_name=TEAMMATE_CHECKPOINT,
+    )
+    if not tokenizer_ready:
+        print(
+            "Falling back to local tokenizer training (may mismatch teammate checkpoint)."
+        )
+        stage_tokenizer.remote(run_eval=False)
 
     stage_download_sft_checkpoint.remote(
         hf_repo=TEAMMATE_HF_REPO,
@@ -832,7 +918,16 @@ def run_rl_part4_k() -> None:
         uv run modal run --detach nanochat_modal.py::run_rl_part4_k
     """
     stage_data.remote(num_shards=NUM_SHARDS)
-    stage_tokenizer.remote(run_eval=False)
+    tokenizer_ready = stage_sync_tokenizer_from_hf.remote(
+        hf_repo=TEAMMATE_HF_REPO,
+        tokenizer_path=TEAMMATE_TOKENIZER_PATH,
+        checkpoint_name=TEAMMATE_CHECKPOINT,
+    )
+    if not tokenizer_ready:
+        print(
+            "Falling back to local tokenizer training (may mismatch teammate checkpoint)."
+        )
+        stage_tokenizer.remote(run_eval=False)
 
     stage_download_sft_checkpoint.remote(
         hf_repo=TEAMMATE_HF_REPO,
@@ -844,6 +939,48 @@ def run_rl_part4_k() -> None:
         model_tag=TEAMMATE_CHECKPOINT,
         model_step=TEAMMATE_STEP,
         reward_system="completion_brevity",
+        num_epochs=TEAMMATE_EPOCHS,
+        device_batch_size=TEAMMATE_DEVICE_BATCH,
+        examples_per_step=TEAMMATE_EXAMPLES_STEP,
+        num_samples=TEAMMATE_NUM_SAMPLES,
+        max_new_tokens=TEAMMATE_MAX_NEW_TOKENS,
+        eval_every=60,
+        eval_examples=400,
+        save_every=60,
+    )
+
+
+@app.local_entrypoint()
+def run_rl_part4_c() -> None:
+    """
+    Part 4 run for combined reward shaping:
+    uses both numeric_distance and completion_brevity simultaneously.
+
+    Run:
+        uv run modal run --detach nanochat_modal.py::run_rl_part4_c
+    """
+    stage_data.remote(num_shards=NUM_SHARDS)
+    tokenizer_ready = stage_sync_tokenizer_from_hf.remote(
+        hf_repo=TEAMMATE_HF_REPO,
+        tokenizer_path=TEAMMATE_TOKENIZER_PATH,
+        checkpoint_name=TEAMMATE_CHECKPOINT,
+    )
+    if not tokenizer_ready:
+        print(
+            "Falling back to local tokenizer training (may mismatch teammate checkpoint)."
+        )
+        stage_tokenizer.remote(run_eval=False)
+
+    stage_download_sft_checkpoint.remote(
+        hf_repo=TEAMMATE_HF_REPO,
+        checkpoint_name=TEAMMATE_CHECKPOINT,
+        step=TEAMMATE_STEP or 0,
+    )
+    stage_rl_d12.remote(
+        run_name="rl-gsm8k-part4-teammate-c-combined",
+        model_tag=TEAMMATE_CHECKPOINT,
+        model_step=TEAMMATE_STEP,
+        reward_system="combined",
         num_epochs=TEAMMATE_EPOCHS,
         device_batch_size=TEAMMATE_DEVICE_BATCH,
         examples_per_step=TEAMMATE_EXAMPLES_STEP,

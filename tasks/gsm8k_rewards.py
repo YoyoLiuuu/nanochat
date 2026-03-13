@@ -142,10 +142,41 @@ def reward_completion_brevity(task, conversation, assistant_response: str):
     }
 
 
+def reward_combined(task, conversation, assistant_response: str):
+    """
+    Combine numeric_distance and completion_brevity in a single reward signal.
+
+    Uses equal weighting of the two shaped rewards:
+        reward = 0.5 * numeric_distance + 0.5 * completion_brevity
+
+    Since each component is already bounded in [0, 1], the combined reward is also
+    bounded in [0, 1]. Exact matches remain at 1.0.
+    """
+    numeric_reward, numeric_components = reward_numeric_distance(
+        task, conversation, assistant_response
+    )
+    brevity_reward, brevity_components = reward_completion_brevity(
+        task, conversation, assistant_response
+    )
+
+    reward = 0.5 * numeric_reward + 0.5 * brevity_reward
+
+    return reward, {
+        "exact_match": float(numeric_components.get("exact_match", 0.0)),
+        "combined_numeric_distance": float(numeric_reward),
+        "combined_completion_brevity": float(brevity_reward),
+        "parseable_answer": float(numeric_components.get("parseable_answer", 0.0)),
+        "numeric_closeness": float(numeric_components.get("numeric_closeness", 0.0)),
+        "brevity_score": float(brevity_components.get("brevity_score", 0.0)),
+        "has_step_words": float(brevity_components.get("has_step_words", 0.0)),
+    }
+
+
 REWARD_SYSTEMS: dict[str, Callable] = {
     "baseline": reward_baseline,
     "numeric_distance": reward_numeric_distance,
     "completion_brevity": reward_completion_brevity,
+    "combined": reward_combined,
 }
 
 
