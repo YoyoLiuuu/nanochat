@@ -43,9 +43,14 @@ import subprocess
 import modal
 from modal import App, Image as ModalImage, Volume, Secret
 
+from dotenv import load_dotenv
+
+
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
+
+load_dotenv()
 
 # ── picochat config ────────────────────────────────────────────────────────────
 # depth=8 → model_dim=512, n_heads=4, ~42M params. Trains in ~1-2hr on A10G.
@@ -64,8 +69,9 @@ GPU = "A10G:1"
 NUM_SHARDS = 12
 
 # ── W&B ───────────────────────────────────────────────────────────────────────
-# Runs appear in wandb.ai/yoyoliuuu/nanochat
-WANDB_ENTITY = "yoyoliuuu"
+# Configure in .env (shared across the whole file)
+WANDB_ENTITY = os.getenv("WANDB_ENTITY", "yoyoliuuu")
+WANDB_PROJECT = os.getenv("WANDB_PROJECT", "nanochat-rl")
 
 # ── Volume + paths ─────────────────────────────────────────────────────────────
 VOLUME_MOUNT = "/vol"
@@ -74,6 +80,21 @@ NANOCHAT_CACHE = f"{VOLUME_MOUNT}/nanochat_cache"
 # ── Timeouts ──────────────────────────────────────────────────────────────────
 TRAIN_TIMEOUT_SEC = 60 * 60 * 4  # 4h max per picochat run (safe margin)
 DOWNLOAD_TIMEOUT_SEC = 60 * 60  # 1h for data download
+
+# ── Teammate RL config for part 4 ───────────────────────────────────────────────────────
+TEAMMATE_HF_REPO = "alvina-yang/csc490a4p2"
+TEAMMATE_CHECKPOINT = "sft-teammate"
+TEAMMATE_STEP = 483
+TEAMMATE_RUN_NAME = "rl-gsm8k-teammate"
+TEAMMATE_GPU = "H100:2"
+TEAMMATE_EPOCHS = 1
+TEAMMATE_DEVICE_BATCH = 8
+TEAMMATE_EXAMPLES_STEP = 64
+TEAMMATE_NUM_SAMPLES = 8
+TEAMMATE_MAX_NEW_TOKENS = 512
+TEAMMATE_REWARD_SYSTEM = "baseline"
+PART4_EVAL_EXAMPLES = 200
+PART4_SAVE_EVERY = 20
 
 # ── Eval toggle ──────────────────────────────────────────────────────────────
 # CORE metric is expensive (~20-40min). Set to -1 to skip during ablation.
@@ -110,7 +131,7 @@ image = (
         "curl -LsSf https://astral.sh/uv/install.sh | sh",
         "echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> $HOME/.bashrc",
     )
-    .pip_install("uv")
+    .pip_install("uv", "python-dotenv")
     .run_commands("uv sync --extra gpu --no-install-project")
     # Env vars: nanochat reads NANOCHAT_BASE_DIR to find its cache
     .env(
@@ -118,6 +139,7 @@ image = (
             "OMP_NUM_THREADS": "1",
             "NANOCHAT_BASE_DIR": NANOCHAT_CACHE,
             "WANDB_ENTITY": WANDB_ENTITY,
+            "WANDB_PROJECT": WANDB_PROJECT,
             "HF_HOME": f"{VOLUME_MOUNT}/hf_cache",
         }
     )
@@ -584,6 +606,8 @@ def stage_rl_d12(
     print(f"  SFT init: {model_tag} step={model_step}  epochs={num_epochs}")
     print(f"  reward_system={reward_system}")
     print(f"  device_batch_size={device_batch_size}  num_samples={num_samples}")
+    print(f"  wandb_entity={WANDB_ENTITY or '(unset)'}")
+    print(f"  wandb_project={WANDB_PROJECT}")
     print(f"{'='*60}\n")
 
     _torchrun(
@@ -700,22 +724,8 @@ def run_rl_gsm8k_d12() -> None:
 
 
 # =============================================================================
-# TEAMMATE RL RUN — edit TEAMMATE_* vars below then run run_rl_teammate
+# TEAMMATE RL RUN — edit TEAMMATE_* vars in the top CONFIGURATION block
 # =============================================================================
-
-# ── Fill these in before running ─────────────────────────────────────────────
-TEAMMATE_HF_REPO = "alvina-yang/csc490a4p2"  # HuggingFace repo
-TEAMMATE_CHECKPOINT = "sft-teammate"  # folder name in the HF repo (d24 SFT baseline)
-TEAMMATE_STEP = 483  # sft-baseline-d24 step
-TEAMMATE_RUN_NAME = "rl-gsm8k-teammate"  # W&B run name + eval log folder
-TEAMMATE_GPU = "H100:2"  # 2x H100 as requested
-TEAMMATE_EPOCHS = 1
-TEAMMATE_DEVICE_BATCH = 8
-TEAMMATE_EXAMPLES_STEP = 64
-TEAMMATE_NUM_SAMPLES = 8
-TEAMMATE_MAX_NEW_TOKENS = 512
-TEAMMATE_REWARD_SYSTEM = "baseline"
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 @app.local_entrypoint()
@@ -774,8 +784,8 @@ def run_rl_part4_j() -> None:
         num_samples=TEAMMATE_NUM_SAMPLES,
         max_new_tokens=TEAMMATE_MAX_NEW_TOKENS,
         eval_every=60,
-        eval_examples=400,
-        save_every=60,
+        eval_examples=PART4_EVAL_EXAMPLES,
+        save_every=PART4_SAVE_EVERY,
     )
 
 
@@ -803,8 +813,8 @@ def run_rl_part4_k() -> None:
         num_samples=TEAMMATE_NUM_SAMPLES,
         max_new_tokens=TEAMMATE_MAX_NEW_TOKENS,
         eval_every=60,
-        eval_examples=400,
-        save_every=60,
+        eval_examples=PART4_EVAL_EXAMPLES,
+        save_every=PART4_SAVE_EVERY,
     )
 
 

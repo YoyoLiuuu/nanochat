@@ -30,6 +30,7 @@ dependencies = [
 dev = [
     "pytest>=8.0.0",
     "modal>=0.73.0",
+    "maturin>=1.0.0",
 ]
 
 [tool.pytest.ini_options]

@@ -156,7 +156,12 @@ use_dummy_wandb = args.run == "dummy" or not master_process
 wandb_run = (
     DummyWandb()
     if use_dummy_wandb
-    else wandb.init(project="nanochat-rl", name=args.run, config=user_config)
+    else wandb.init(
+        project=os.environ.get("WANDB_PROJECT", "nanochat-rl"),
+        entity=os.environ.get("WANDB_ENTITY", "yoyoliuuu"),
+        name=args.run,
+        config=user_config,
+    )
 )
 
 # Init model and tokenizer
