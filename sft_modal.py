@@ -16,7 +16,7 @@ from modal import App, Image as ModalImage, Volume, Secret
 DEPTH = 24
 TARGET_PARAM_DATA_RATIO = 9.5
 NPROC = 4
-DEVICE_BATCH_SIZE = 16
+DEVICE_BATCH_SIZE = 8  # d24 without FP8 needs smaller batch to fit in VRAM
 GPU = "H100:4"
 NUM_DATA_SHARDS = 170
 
