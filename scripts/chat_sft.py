@@ -126,6 +126,9 @@ for name, fallback, source in [
     else:
         print0(f"Using {name}={arg_val}")
 
+# Ensure model weights match compute dtype (bf16 on CUDA) before compilation
+if device_type == "cuda":
+    model = model.to(COMPUTE_DTYPE)
 orig_model = model
 model = torch.compile(model, dynamic=False)
 depth = model.config.n_layer
