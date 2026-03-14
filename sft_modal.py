@@ -271,15 +271,15 @@ def run_evals() -> None:
     """Eval both SFT checkpoints only."""
     _setup_cache()
     print("[1/2] Eval baseline (GSM8K + SpellingBee + ARC-Easy)...")
-    _torchrun("scripts.chat_eval", [
+    _python("scripts.chat_eval", [
         "-i", "sft", f"--model-tag={BASELINE_SFT_TAG}",
         "-a", "GSM8K|SpellingBee|ARC-Easy",
-    ], nproc=NPROC)
+    ])
     print("[2/2] Eval enhanced (GSM8K + SpellingBee + ARC-Easy)...")
-    _torchrun("scripts.chat_eval", [
+    _python("scripts.chat_eval", [
         "-i", "sft", f"--model-tag={ENHANCED_SFT_TAG}",
         "-a", "GSM8K|SpellingBee|ARC-Easy",
-    ], nproc=NPROC)
+    ])
     volume.commit()
     print("All evals done!")
 
