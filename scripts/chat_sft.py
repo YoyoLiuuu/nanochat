@@ -64,6 +64,8 @@ parser.add_argument("--chatcore-every", type=int, default=200, help="evaluate Ch
 parser.add_argument("--chatcore-max-cat", type=int, default=-1, help="max problems per categorical task for ChatCORE")
 parser.add_argument("--chatcore-max-sample", type=int, default=24, help="max problems per generative task for ChatCORE")
 # Data mixture
+parser.add_argument("--save-every", type=int, default=500, help="save checkpoint every N steps (-1 = only at end)")
+# Data mixture
 parser.add_argument("--mmlu-epochs", type=int, default=3, help="number of epochs of MMLU in training mixture (teaches Multiple Choice)")
 parser.add_argument("--gsm8k-epochs", type=int, default=4, help="number of epochs of GSM8K in training mixture (teaches Math and Tool Use)")
 args = parser.parse_args()
@@ -394,6 +396,13 @@ while True:
             **{f"chatcore/{task_name}": acc for task_name, acc in task_results.items()},
         })
         model.train()
+
+    # save checkpoint periodically (master process only — no optimizer state mid-run)
+    if master_process and args.save_every > 0 and step > 0 and step % args.save_every == 0 and not last_step:
+        output_dirname = args.model_tag if args.model_tag else f"d{depth}"
+        checkpoint_dir = os.path.join(base_dir, "chatsft_checkpoints", output_dirname)
+        save_checkpoint(checkpoint_dir, step, orig_model.state_dict(), None, {"step": step})
+        print(f"✅ Saved model checkpoint to {checkpoint_dir} (step {step})")
 
     # save checkpoint at the end of the run (all ranks participate so each saves its optimizer shard)
     if last_step:
