@@ -790,6 +790,27 @@ def download_eval_logs() -> None:
     _download_eval_logs.remote(run_name=TEAMMATE_RUN_NAME)
 
 
+@app.local_entrypoint()
+def download_d20_eval_logs() -> None:
+    """
+    Download d20 RL eval log JSONs locally to ./eval_logs/rl-gsm8k-nanochat-d20/.
+    Run: uv run modal run nanochat_modal.py::download_d20_eval_logs
+    """
+    import json, os
+    run_name = D20_RL_RUN
+    logs = _download_eval_logs.remote(run_name=run_name, base_dir=D20_CACHE)
+    if not logs:
+        return
+    out_dir = os.path.join("eval_logs", run_name)
+    os.makedirs(out_dir, exist_ok=True)
+    for fname, data in logs.items():
+        fpath = os.path.join(out_dir, fname)
+        with open(fpath, "w") as f:
+            json.dump(data, f, indent=2)
+        print(f"  Saved {fpath}")
+    print(f"\nDone. {len(logs)} file(s) in ./{out_dir}/")
+
+
 @app.function(
     image=image,
     secrets=[secret],
@@ -797,10 +818,10 @@ def download_eval_logs() -> None:
     cpu=1,
     timeout=120,
 )
-def _download_eval_logs(run_name: str) -> dict:
+def _download_eval_logs(run_name: str, base_dir: str = NANOCHAT_CACHE) -> dict:
     """Return all eval log JSONs as a dict keyed by filename."""
     import json as _json, glob as _glob
-    log_dir = f"{NANOCHAT_CACHE}/chatrl_eval_logs/{run_name}"
+    log_dir = f"{base_dir}/chatrl_eval_logs/{run_name}"
     files = sorted(_glob.glob(f"{log_dir}/eval_step_*.json"))
     if not files:
         print(f"No eval logs found at {log_dir}")
@@ -1380,6 +1401,56 @@ def stage_d20_pipeline() -> None:
         hf_folder="rl-gsm8k-nanochat-d20",
         source_base_dir=D20_CACHE,
     )
+
+
+# =============================================================================
+# D20 STANDALONE EVAL
+# =============================================================================
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    gpu="H100:4",
+    timeout=60 * 60,
+)
+def stage_eval_d20_rl(
+    step: int = 115,
+    model_tag: str = D20_BASE_TAG,
+    run_name: str = D20_RL_RUN,
+    eval_examples: int = 400,
+    device_batch_size: int = 8,
+    nanochat_base_dir: str = D20_CACHE,
+) -> None:
+    """Run GSM8K pass@k eval on a specific d20 RL checkpoint and save an eval log JSON.
+
+    Loads chatrl_checkpoints/{model_tag}/model_{step:06d}.pt, evaluates on GSM8K,
+    and writes the result to chatrl_eval_logs/{run_name}/eval_step_{step:06d}.json.
+    """
+    _setup_cache()
+    _torchrun(
+        "scripts.gsm8k_eval",
+        [
+            "--source=rl",
+            f"--model-tag={model_tag}",
+            f"--step={step}",
+            f"--run-name={run_name}",
+            f"--device-batch-size={device_batch_size}",
+            f"--eval-examples={eval_examples}",
+        ],
+        nproc=4,
+        nanochat_base_dir=nanochat_base_dir,
+    )
+    volume.commit()
+    print(f"Eval done. Log saved to {nanochat_base_dir}/chatrl_eval_logs/{run_name}/eval_step_{step:06d}.json")
+
+
+@app.local_entrypoint()
+def eval_d20_rl() -> None:
+    """Run GSM8K eval on the d20 RL step-115 checkpoint.
+    Run: uv run modal run nanochat_modal.py::eval_d20_rl
+    """
+    stage_eval_d20_rl.remote(step=115)
 
     print("\n" + "="*60)
     print(f"All done! Checkpoints at: https://huggingface.co/{D20_HF_PUSH_REPO}")
