@@ -150,20 +150,23 @@ def run_pipeline() -> None:
     else:
         print("Tokenizer exists, skipping.")
 
-    # [3] Download pretrained model from HF (already trained on old workspace)
-    print("[3/8] Downloading pretrained d24 from HuggingFace...")
-    import urllib.request
-    dest_dir = os.path.join(NANOCHAT_CACHE, "base_checkpoints", PRETRAIN_MODEL_TAG)
-    os.makedirs(dest_dir, exist_ok=True)
-    for fname in ["model_006612.pt", "meta_006612.json"]:
-        dest = os.path.join(dest_dir, fname)
-        if os.path.exists(dest):
-            print(f"  Already exists: {fname}")
-            continue
-        url = f"https://huggingface.co/{HF_REPO}/resolve/main/pretrained-d24-original/{fname}"
-        print(f"  Downloading {fname}...")
-        urllib.request.urlretrieve(url, dest)
-        print(f"  Done: {os.path.getsize(dest)/1e6:.0f} MB")
+    # [3] Pretrain d24 relu2+RoPE10K (NO FP8 — avoids dtype mismatch in SFT)
+    print("[3/8] Pretraining d24 (relu2 + RoPE 10K, NO FP8)...")
+    pretrain_dir = os.path.join(NANOCHAT_CACHE, "base_checkpoints", PRETRAIN_MODEL_TAG)
+    if os.path.exists(pretrain_dir) and any(f.startswith("meta_") for f in os.listdir(pretrain_dir)):
+        print("  Pretrained model exists, skipping.")
+    else:
+        _python("nanochat.report", ["reset"])
+        _torchrun("scripts.base_train", [
+            f"--depth={DEPTH}",
+            f"--target-param-data-ratio={TARGET_PARAM_DATA_RATIO}",
+            f"--device-batch-size={DEVICE_BATCH_SIZE}",
+            "--mlp-type=relu2", "--rope-base=10000",
+            f"--model-tag={PRETRAIN_MODEL_TAG}",
+            "--run=a4p2-pretrain-d24-original",
+            "--save-every=500", "--eval-every=250",
+            "--core-metric-every=-1", "--sample-every=-1",
+        ], nproc=NPROC)
     volume.commit()
 
     # [4] SFT baseline
