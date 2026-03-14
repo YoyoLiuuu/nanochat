@@ -161,7 +161,7 @@ def run_pipeline() -> None:
             f"--depth={DEPTH}",
             f"--target-param-data-ratio={TARGET_PARAM_DATA_RATIO}",
             f"--device-batch-size={DEVICE_BATCH_SIZE}",
-            "--mlp-type=relu2", "--rope-base=10000",
+            "--mlp-type=relu2", "--rope-base=10000", "--fp8",
             f"--model-tag={PRETRAIN_MODEL_TAG}",
             "--run=a4p2-pretrain-d24-original",
             "--save-every=500", "--eval-every=250",
