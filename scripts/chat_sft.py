@@ -31,6 +31,9 @@ from tasks.mmlu import MMLU
 from tasks.smoltalk import SmolTalk
 from tasks.customjson import CustomJSON
 from tasks.spellingbee import SimpleSpelling, SpellingBee
+from tasks.metamathqa import MetaMathQA
+from tasks.orcamath import OrcaMath
+from tasks.ultrachat import UltraChat
 
 # -----------------------------------------------------------------------------
 # CLI arguments
@@ -68,6 +71,10 @@ parser.add_argument("--save-every", type=int, default=500, help="save checkpoint
 # Data mixture
 parser.add_argument("--mmlu-epochs", type=int, default=3, help="number of epochs of MMLU in training mixture (teaches Multiple Choice)")
 parser.add_argument("--gsm8k-epochs", type=int, default=4, help="number of epochs of GSM8K in training mixture (teaches Math and Tool Use)")
+# Additional datasets (0 = disabled)
+parser.add_argument("--metamathqa-size", type=int, default=0, help="number of MetaMathQA rows to include (0 = disabled)")
+parser.add_argument("--orcamath-size", type=int, default=0, help="number of Orca-Math rows to include (0 = disabled)")
+parser.add_argument("--ultrachat-size", type=int, default=0, help="number of UltraChat-200k rows to include (0 = disabled)")
 args = parser.parse_args()
 user_config = vars(args).copy()
 # -----------------------------------------------------------------------------
@@ -174,6 +181,16 @@ train_tasks = [
     SimpleSpelling(size=200000, split="train"), # 200K rows of Simple Spelling (e.g. spell the word 'apple')
     SpellingBee(size=80000, split="train"), # 80K rows of Spelling Bee (e.g. how many 'r' are in 'strawberry'?)
 ]
+# Optionally add new datasets
+if args.metamathqa_size > 0:
+    train_tasks.append(MetaMathQA(split="train", stop=args.metamathqa_size))
+    print0(f"Added MetaMathQA: {len(train_tasks[-1]):,} rows")
+if args.orcamath_size > 0:
+    train_tasks.append(OrcaMath(split="train", stop=args.orcamath_size))
+    print0(f"Added Orca-Math: {len(train_tasks[-1]):,} rows")
+if args.ultrachat_size > 0:
+    train_tasks.append(UltraChat(split="train_sft", stop=args.ultrachat_size))
+    print0(f"Added UltraChat: {len(train_tasks[-1]):,} rows")
 train_dataset = TaskMixture(train_tasks)
 print0(f"Training mixture: {len(train_dataset):,} rows (MMLU x{args.mmlu_epochs}, GSM8K x{args.gsm8k_epochs})")
 val_dataset = TaskMixture([
