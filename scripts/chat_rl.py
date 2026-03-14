@@ -27,6 +27,7 @@ from nanochat.common import compute_init, compute_cleanup, print0, get_base_dir,
 from nanochat.checkpoint_manager import save_checkpoint, load_model
 from nanochat.engine import Engine
 from tasks.gsm8k import GSM8K
+from tasks.gsm8k_rewards import get_reward_fn
 
 # -----------------------------------------------------------------------------
 # CLI arguments
@@ -58,8 +59,10 @@ parser.add_argument("--init-lr-frac", type=float, default=0.05, help="initial LR
 parser.add_argument("--eval-every", type=int, default=60, help="evaluate pass@k every N steps")
 parser.add_argument("--eval-examples", type=int, default=400, help="number of examples for pass@k evaluation")
 parser.add_argument("--save-every", type=int, default=60, help="save checkpoint every N steps")
+parser.add_argument("--reward-system", type=str, default="baseline", help="reward system to use (baseline|numeric_distance|completion_brevity)")
 args = parser.parse_args()
 user_config = vars(args).copy()
+reward_fn = get_reward_fn(args.reward_system)
 # -----------------------------------------------------------------------------
 
 # Init compute/precision
@@ -123,7 +126,7 @@ def get_batch():
             # Decode the generated response
             generated_text = tokenizer.decode(generated_tokens)
             # Calculate the reward
-            reward = train_task.reward(conversation, generated_text)
+            reward, _metrics = reward_fn(train_task, conversation, generated_text)
             rewards.append(reward)
 
         # Pad the sequences so that their lengths (in time) match

@@ -446,12 +446,13 @@ def stage_download_sft_checkpoint(
     checkpoint_name: str = "sft-baseline",
     step: int = 32146,
     hf_subfolder: str | None = None,
+    dest_base_dir: str | None = None,
 ) -> None:
     """Download SFT checkpoint .pt files from HuggingFace into the Modal volume.
     Pass step=0 to auto-detect the step from common candidates.
     Pass hf_subfolder="" for repos where files live at the repo root (e.g. karpathy/nanochat-d32)."""
     import urllib.request
-    dest_dir = f"{NANOCHAT_CACHE}/chatsft_checkpoints/{checkpoint_name}"
+    dest_dir = f"{dest_base_dir or NANOCHAT_CACHE}/chatsft_checkpoints/{checkpoint_name}"
     os.makedirs(dest_dir, exist_ok=True)
     subfolder = checkpoint_name if hf_subfolder is None else hf_subfolder
     base_url = f"https://huggingface.co/{hf_repo}/resolve/main/{subfolder}".rstrip("/")
@@ -1300,6 +1301,7 @@ def stage_rl_d20(
     eval_examples: int = 400,
     save_every: int = 60,
     nanochat_base_dir: str = D20_CACHE,
+    reward_system: str = "baseline",
 ) -> None:
     """RL (GRPO) on GSM8K from the d20 SFT checkpoint, 4x H100.
     Loads from chatsft_checkpoints/nanochat-d20/ (auto-detects last step)."""
@@ -1318,6 +1320,7 @@ def stage_rl_d20(
             f"--eval-every={eval_every}",
             f"--eval-examples={eval_examples}",
             f"--save-every={save_every}",
+            f"--reward-system={reward_system}",
         ],
         nproc=4,
         nanochat_base_dir=nanochat_base_dir,
@@ -1398,3 +1401,72 @@ def run_d20_pipeline() -> None:
     print("Submitting d20 pipeline to Modal (runs server-side, safe to close terminal)...")
     stage_d20_pipeline.spawn()
     print(f"Submitted! Results will be pushed to: {D20_HF_PUSH_REPO}")
+
+
+# =============================================================================
+# PART 4 (KERRI): RL with completion_brevity reward on sft-nanochat-d20
+# =============================================================================
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    cpu=1,
+    timeout=86400,
+)
+def stage_rl_part4_k_pipeline() -> None:
+    """Download sft-nanochat-d20 (step 965) from teammate's HF repo, then run RL
+    with completion_brevity reward shaping. Requires d20 tokenizer already in
+    D20_CACHE (present if run_d20_pipeline was previously run on this volume)."""
+    print("Step 1a: Downloading d20 tokenizer from sdobson/nanochat...")
+    stage_download_base_checkpoint.remote(
+        hf_repo="sdobson/nanochat",
+        checkpoint_name=D20_BASE_TAG,
+        step=D20_BASE_STEP,
+        hf_subfolder="",
+        dest_base_dir=D20_CACHE,
+        download_tokenizer=True,
+        tokenizer_hf_path="tokenizer.pkl",
+    )
+    print("Step 1b: Downloading sft-nanochat-d20 checkpoint (step 965)...")
+    stage_download_sft_checkpoint.remote(
+        hf_repo="yoyoliuuu/nanochat-d20-finetuned",
+        checkpoint_name="sft-nanochat-d20",
+        step=965,
+        hf_subfolder="sft-nanochat-d20",
+        dest_base_dir=D20_CACHE,
+    )
+    print("Step 2: Running RL with completion_brevity reward...")
+    stage_rl_d20.remote(
+        run_name="rl-gsm8k-d20-brevity-k",
+        model_tag="sft-nanochat-d20",
+        reward_system="completion_brevity",
+    )
+
+
+@app.local_entrypoint()
+def run_rl_part4_k() -> None:
+    """
+    Kerri's Part 4 RL run: completion_brevity reward shaping on sft-nanochat-d20 (step 965).
+    Downloads checkpoint from yoyoliuuu/nanochat-d20-finetuned, then runs RL on 4x H100.
+    Logs to W&B project nanochat-rl under run name rl-gsm8k-d20-brevity-k.
+    Run: uv run modal run --detach nanochat_modal.py::run_rl_part4_k
+    """
+    stage_rl_part4_k_pipeline.remote()
+
+
+@app.local_entrypoint()
+def push_rl_part4_k() -> None:
+    """
+    Push Kerri's Part 4 RL checkpoint to yoyoliuuu/nanochat-d20-finetuned
+    under the subfolder rl-gsm8k-d20-brevity-k (visible to teammates).
+    Run after training completes:
+        uv run modal run nanochat_modal.py::push_rl_part4_k
+    """
+    stage_push_checkpoint_to_hf.remote(
+        source="rl",
+        model_tag="rl-gsm8k-d20-brevity-k",
+        hf_repo="yoyoliuuu/nanochat-d20-finetuned",
+        hf_folder="rl-gsm8k-d20-brevity-k",
+        source_base_dir=D20_CACHE,
+    )
