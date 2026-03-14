@@ -80,12 +80,9 @@ def _torchrun(module, args=None, *, nproc=NPROC):
 
 def _run(cmd):
     print(f"\n>>>  {cmd}\n", flush=True)
-    result = subprocess.run(["bash", "-c", cmd], check=False,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    if result.stdout:
-        print(result.stdout[-5000:], flush=True)
+    result = subprocess.run(["bash", "-c", cmd], check=False)
     if result.returncode != 0:
-        raise RuntimeError(f"Command failed (exit {result.returncode}):\n  {cmd}\n{result.stdout[-2000:] if result.stdout else ''}")
+        raise RuntimeError(f"Command failed (exit {result.returncode}):\n  {cmd}")
 
 def _setup_cache():
     os.makedirs(NANOCHAT_CACHE, exist_ok=True)
