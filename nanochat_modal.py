@@ -811,6 +811,33 @@ def download_d20_eval_logs() -> None:
     print(f"\nDone. {len(logs)} file(s) in ./{out_dir}/")
 
 
+@app.local_entrypoint()
+def download_all_d20_eval_logs() -> None:
+    """Download eval logs for all d20 RL reward-system runs to ./eval_logs/.
+    Run: uv run modal run nanochat_modal.py::download_all_d20_eval_logs
+    """
+    import json, os
+    run_names = [
+        D20_RL_RUN,                              # baseline
+        f"{D20_RL_RUN}-numeric_distance",
+        f"{D20_RL_RUN}-completion_brevity",
+        f"{D20_RL_RUN}-combined",
+    ]
+    for run_name in run_names:
+        logs = _download_eval_logs.remote(run_name=run_name, base_dir=D20_CACHE)
+        if not logs:
+            print(f"  (no logs for {run_name})")
+            continue
+        out_dir = os.path.join("eval_logs", run_name)
+        os.makedirs(out_dir, exist_ok=True)
+        for fname, data in logs.items():
+            fpath = os.path.join(out_dir, fname)
+            with open(fpath, "w") as f:
+                json.dump(data, f, indent=2)
+        print(f"  {run_name}: {len(logs)} file(s) → ./{out_dir}/")
+    print("Done.")
+
+
 @app.function(
     image=image,
     secrets=[secret],
