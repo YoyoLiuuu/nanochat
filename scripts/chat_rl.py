@@ -120,14 +120,16 @@ def get_batch():
 
         # Calculate the rewards for each sample
         rewards = []
+        metrics_list = []
         for sample_tokens in generated_token_sequences:
             # Get just the generated tokens (after the prompt)
             generated_tokens = sample_tokens[prefix_length:]
             # Decode the generated response
             generated_text = tokenizer.decode(generated_tokens)
             # Calculate the reward
-            reward, _metrics = reward_fn(train_task, conversation, generated_text)
+            reward, metrics = reward_fn(train_task, conversation, generated_text)
             rewards.append(reward)
+            metrics_list.append(metrics)
 
         # Pad the sequences so that their lengths (in time) match
         max_length = max(len(seq) for seq in generated_token_sequences)
@@ -146,8 +148,10 @@ def get_batch():
         # Calculate the advantages by simply subtracting the mean (instead of z-score (x-mu)/sigma)
         mu = rewards.mean()
         advantages = rewards - mu
+        # Average metrics across samples for this example
+        avg_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
         # yield inputs/targets as (B, T) of ids and rewards as (B,) of floats
-        yield generated_token_sequences, inputs, targets, rewards, advantages
+        yield generated_token_sequences, inputs, targets, rewards, advantages, avg_metrics
 
 # -----------------------------------------------------------------------------
 # Simple evaluation loop for GSM8K pass@k
@@ -279,9 +283,12 @@ for step in range(num_steps):
     # Forward/Backward on rollouts over multiple examples in the dataset
     rewards_list = []
     sequence_lengths = []
+    metrics_accum = {}
     for example_step in range(examples_per_rank):
         # Get one batch corresponding to one example in the training dataset
-        sequences_all, inputs_all, targets_all, rewards_all, advantages_all = next(batch_iterator)
+        sequences_all, inputs_all, targets_all, rewards_all, advantages_all, step_metrics = next(batch_iterator)
+        for k, v in step_metrics.items():
+            metrics_accum.setdefault(k, []).append(v)
         # Evaluate the loss and gradients
         model.train() # ensure the model is in train mode
         # We need one more loop because we can never exceed the device_batch_size
@@ -321,10 +328,12 @@ for step in range(num_steps):
         mean_reward = mean_reward_tensor.item()
         mean_sequence_length = mean_sequence_length_tensor.item()
     print0(f"Step {step}/{num_steps} | Average reward: {mean_reward} | Average sequence length: {mean_sequence_length:.2f}")
+    mean_metrics = {f"reward/{k}": sum(v) / len(v) for k, v in metrics_accum.items()}
     wandb_run.log({
         "step": step,
         "reward": mean_reward,
         "sequence_length": mean_sequence_length,
+        **mean_metrics,
     })
 
     # Update the model parameters

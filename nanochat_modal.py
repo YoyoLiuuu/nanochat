@@ -91,7 +91,7 @@ app = App("nanochat-final")
 volume = Volume.from_name("nanochat-vol", create_if_missing=True)
 
 # Secret: WANDB_API_KEY and HF_TOKEN injected as env vars
-secret = Secret.from_name("nanochat-secrets")
+secret = Secret.from_name("nanochat-secrets-a4")
 
 # Container image — rebuilt automatically if source files change
 image = (
@@ -1456,20 +1456,133 @@ def run_rl_part4_k() -> None:
 
 
 @app.local_entrypoint()
+def run_rl_part4_k_combined() -> None:
+    """
+    Kerri's Part 4 RL run: numeric_brevity (combined numeric distance + brevity) reward
+    on sft-nanochat-d20 (step 965). Logs to W&B as rl-gsm8k-d20-numeric-brevity-k.
+    Run: uv run modal run --detach nanochat_modal.py::run_rl_part4_k_combined
+    """
+    stage_download_base_checkpoint.remote(
+        hf_repo="sdobson/nanochat",
+        checkpoint_name=D20_BASE_TAG,
+        step=D20_BASE_STEP,
+        hf_subfolder="",
+        dest_base_dir=D20_CACHE,
+        download_tokenizer=True,
+        tokenizer_hf_path="tokenizer.pkl",
+    )
+    stage_download_sft_checkpoint.remote(
+        hf_repo="yoyoliuuu/nanochat-d20-finetuned",
+        checkpoint_name="sft-nanochat-d20",
+        step=965,
+        hf_subfolder="sft-nanochat-d20",
+        dest_base_dir=D20_CACHE,
+    )
+    stage_rl_d20.remote(
+        run_name="rl-gsm8k-d20-numeric-brevity-k",
+        model_tag="sft-nanochat-d20",
+        reward_system="numeric_brevity",
+    )
+
+
+@app.local_entrypoint()
 def push_rl_part4_k() -> None:
     """
-    Push Kerri's Part 4 RL checkpoint to yoyoliuuu/nanochat-d20-finetuned
-    under the subfolder rl-gsm8k-d20-brevity-k (visible to teammates).
-    Run after training completes:
+    Push Kerri's brevity RL checkpoint to kerriwei/nanochat-rl-brevity-k.
+    Run after brevity training completes:
         uv run modal run nanochat_modal.py::push_rl_part4_k
     """
     stage_push_checkpoint_to_hf.remote(
         source="rl",
-        model_tag="rl-gsm8k-d20-brevity-k",
-        hf_repo="yoyoliuuu/nanochat-d20-finetuned",
+        model_tag="sft-nanochat-d20",
+        hf_repo="kerriwei/nanochat-rl-brevity-k",
         hf_folder="rl-gsm8k-d20-brevity-k",
         source_base_dir=D20_CACHE,
     )
+
+
+@app.local_entrypoint()
+def push_rl_part4_k_combined() -> None:
+    """
+    Push Kerri's combined numeric-brevity RL checkpoint to kerriwei/nanochat-rl-brevity-k.
+    Run after combined training completes:
+        uv run modal run nanochat_modal.py::push_rl_part4_k_combined
+    """
+    stage_push_checkpoint_to_hf.remote(
+        source="rl",
+        model_tag="sft-nanochat-d20",
+        hf_repo="kerriwei/nanochat-rl-brevity-k",
+        hf_folder="rl-gsm8k-d20-numeric-brevity-k",
+        source_base_dir=D20_CACHE,
+    )
+
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    gpu="H100:4",
+    timeout=TRAIN_TIMEOUT_SEC,
+)
+def stage_eval_d20_rl(
+    step: int = 115,
+    model_tag: str = D20_BASE_TAG,
+    eval_examples: int = 400,
+    device_batch_size: int = 8,
+    nanochat_base_dir: str = D20_CACHE,
+) -> None:
+    """Run GSM8K eval on a specific d20 RL checkpoint using scripts.chat_eval."""
+    _setup_cache()
+    _torchrun(
+        "scripts.chat_eval",
+        [
+            "--source=rl",
+            f"--model-tag={model_tag}",
+            f"--step={step}",
+            "--task-name=GSM8K",
+            f"--batch-size={device_batch_size}",
+            f"--max-problems={eval_examples}",
+        ],
+        nproc=4,
+        nanochat_base_dir=nanochat_base_dir,
+    )
+    volume.commit()
+    print(f"Eval done for {model_tag} step={step}.")
+
+
+@app.local_entrypoint()
+def eval_rl_part4_k() -> None:
+    """Run GSM8K eval on Kerri's Part 4 RL checkpoint (rl-gsm8k-d20-brevity-k).
+    Run: uv run modal run nanochat_modal.py::eval_rl_part4_k
+    Pass --step to evaluate a specific checkpoint step.
+    """
+    stage_eval_d20_rl.remote(
+        model_tag="sft-nanochat-d20",
+        nanochat_base_dir=D20_CACHE,
+    )
+
+
+@app.local_entrypoint()
+def download_eval_logs_part4_k_combined() -> None:
+    """
+    Download eval log JSONs for the combined numeric-brevity RL run from the Modal volume.
+    Saves to ./eval_logs/rl-gsm8k-d20-numeric-brevity-k/ locally.
+    Run: uv run modal run nanochat_modal.py::download_eval_logs_part4_k_combined
+    """
+    import json, os
+    run_name = "rl-gsm8k-d20-numeric-brevity-k"
+    logs = _download_eval_logs_d20.remote(run_name=run_name)
+    if not logs:
+        print("No eval logs found.")
+        return
+    out_dir = os.path.join("eval_logs", run_name)
+    os.makedirs(out_dir, exist_ok=True)
+    for fname, data in logs.items():
+        out_path = os.path.join(out_dir, fname)
+        with open(out_path, "w") as f:
+            json.dump(data, f, indent=2)
+        print(f"Saved {out_path}")
+    print(f"Downloaded {len(logs)} file(s) to {out_dir}/")
 
 
 # =============================================================================
@@ -1610,3 +1723,27 @@ def push_rl_part4_n() -> None:
         hf_folder="rl-gsm8k-d20-numeric-distance-n",
         source_base_dir=D20_CACHE,
     )
+
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    cpu=1,
+    timeout=120,
+)
+def _download_eval_logs_d20(run_name: str) -> dict:
+    """Return eval log JSONs from D20_CACHE as a dict keyed by filename."""
+    import json as _json, glob as _glob
+    log_dir = f"{D20_CACHE}/chatrl_eval_logs/{run_name}"
+    files = sorted(_glob.glob(f"{log_dir}/eval_step_*.json"))
+    if not files:
+        print(f"No eval logs found at {log_dir}")
+        return {}
+    result = {}
+    for fpath in files:
+        fname = os.path.basename(fpath)
+        with open(fpath) as f:
+            result[fname] = _json.load(f)
+        print(f"  Loaded {fname}")
+    return result

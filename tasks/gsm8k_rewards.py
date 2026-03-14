@@ -122,10 +122,81 @@ def reward_completion_brevity(task, conversation, assistant_response: str):
     }
 
 
+def reward_numeric_brevity(task, conversation, assistant_response: str):
+    """
+    Combined numeric-distance + brevity shaping.
+
+    reward = 1.0 (if exact)
+           else 0.10 * parseable_answer
+              + 0.25 * numeric_closeness
+              + 0.08 * has_step_words
+              + 0.12 * brevity_score
+
+    numeric_closeness = exp(-|pred-ref| / (|ref| + 1))
+    brevity_score = 1.0 if length <= 220, decays to 0.0 by length 520
+    """
+    exact = float(task.evaluate(conversation, assistant_response))
+
+    assistant_message = conversation["messages"][-1]
+    assert assistant_message["role"] == "assistant", "Last message must be from assistant"
+    ref_text = assistant_message["content"][-1]["text"]
+    ref_num = extract_answer(ref_text)
+
+    pred_num = extract_answer(assistant_response)
+    parseable = float(pred_num is not None)
+
+    if exact > 0.0:
+        return 1.0, {
+            "exact_match": 1.0,
+            "parseable_answer": parseable,
+            "numeric_closeness": 1.0,
+            "has_step_words": 0.0,
+            "brevity_score": 0.0,
+        }
+
+    closeness = 0.0
+    try:
+        if pred_num is not None and ref_num is not None:
+            pred_val = float(pred_num)
+            ref_val = float(ref_num)
+            closeness = math.exp(-abs(pred_val - ref_val) / (abs(ref_val) + 1.0))
+    except Exception:
+        closeness = 0.0
+
+    length = len(assistant_response)
+    low, high = 220, 520
+    if length <= low:
+        brevity_score = 1.0
+    elif length >= high:
+        brevity_score = 0.0
+    else:
+        brevity_score = 1.0 - ((length - low) / (high - low))
+
+    has_step_words = float(
+        bool(
+            re.search(
+                r"\b(first|then|therefore|so|total|finally)\b",
+                assistant_response.lower(),
+            )
+        )
+    )
+
+    reward = 0.10 * parseable + 0.25 * closeness + 0.08 * has_step_words + 0.12 * brevity_score
+
+    return reward, {
+        "exact_match": exact,
+        "parseable_answer": parseable,
+        "numeric_closeness": closeness,
+        "has_step_words": has_step_words,
+        "brevity_score": brevity_score,
+    }
+
+
 REWARD_SYSTEMS: dict[str, Callable] = {
     "baseline": reward_baseline,
     "numeric_distance": reward_numeric_distance,
     "completion_brevity": reward_completion_brevity,
+    "numeric_brevity": reward_numeric_brevity,
 }
 
 
