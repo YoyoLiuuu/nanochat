@@ -1470,3 +1470,143 @@ def push_rl_part4_k() -> None:
         hf_folder="rl-gsm8k-d20-brevity-k",
         source_base_dir=D20_CACHE,
     )
+
+
+# =============================================================================
+# PART 4 (J): RL with combined reward on sft-nanochat-d20
+# =============================================================================
+
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    cpu=1,
+    timeout=86400,
+)
+def stage_rl_part4_j_pipeline() -> None:
+    """Download sft-nanochat-d20 (step 965) from teammate's HF repo, then run RL
+    with combined reward shaping. Requires d20 tokenizer already in
+    D20_CACHE (present if run_d20_pipeline was previously run on this volume)."""
+    print("Step 1a: Downloading d20 tokenizer from sdobson/nanochat...")
+    stage_download_base_checkpoint.remote(
+        hf_repo="sdobson/nanochat",
+        checkpoint_name=D20_BASE_TAG,
+        step=D20_BASE_STEP,
+        hf_subfolder="",
+        dest_base_dir=D20_CACHE,
+        download_tokenizer=True,
+        tokenizer_hf_path="tokenizer.pkl",
+    )
+    print("Step 1b: Downloading sft-nanochat-d20 checkpoint (step 965)...")
+    stage_download_sft_checkpoint.remote(
+        hf_repo="yoyoliuuu/nanochat-d20-finetuned",
+        checkpoint_name="sft-nanochat-d20",
+        step=965,
+        hf_subfolder="sft-nanochat-d20",
+        dest_base_dir=D20_CACHE,
+    )
+    print("Step 2: Running RL with combined reward...")
+    stage_rl_d20.remote(
+        run_name="rl-gsm8k-d20-combined-j",
+        model_tag="sft-nanochat-d20",
+        reward_system="combined",
+    )
+
+
+@app.local_entrypoint()
+def run_rl_part4_j() -> None:
+    """
+    J's Part 4 RL run: combined reward shaping on sft-nanochat-d20 (step 965).
+    Downloads checkpoint from yoyoliuuu/nanochat-d20-finetuned, then runs RL on 4x H100.
+    Logs to W&B project nanochat-rl under run name rl-gsm8k-d20-combined-j.
+    Run: uv run modal run --detach nanochat_modal.py::run_rl_part4_j
+    """
+    stage_rl_part4_j_pipeline.remote()
+
+
+@app.local_entrypoint()
+def push_rl_part4_j() -> None:
+    """
+    Push J's Part 4 RL checkpoint to yoyoliuuu/nanochat-d20-finetuned
+    under the subfolder rl-gsm8k-d20-combined-j (visible to teammates).
+    Run after training completes:
+        uv run modal run nanochat_modal.py::push_rl_part4_j
+    """
+    stage_push_checkpoint_to_hf.remote(
+        source="rl",
+        model_tag="rl-gsm8k-d20-combined-j",
+        hf_repo="yoyoliuuu/nanochat-d20-finetuned",
+        hf_folder="rl-gsm8k-d20-combined-j",
+        source_base_dir=D20_CACHE,
+    )
+
+
+# =============================================================================
+# PART 4 (N): RL with numeric_distance reward on sft-nanochat-d20
+# =============================================================================
+
+
+@app.function(
+    image=image,
+    secrets=[secret],
+    volumes={VOLUME_MOUNT: volume},
+    cpu=1,
+    timeout=86400,
+)
+def stage_rl_part4_n_pipeline() -> None:
+    """Download sft-nanochat-d20 (step 965) from teammate's HF repo, then run RL
+    with numeric_distance reward shaping. Requires d20 tokenizer already in
+    D20_CACHE (present if run_d20_pipeline was previously run on this volume)."""
+    print("Step 1a: Downloading d20 tokenizer from sdobson/nanochat...")
+    stage_download_base_checkpoint.remote(
+        hf_repo="sdobson/nanochat",
+        checkpoint_name=D20_BASE_TAG,
+        step=D20_BASE_STEP,
+        hf_subfolder="",
+        dest_base_dir=D20_CACHE,
+        download_tokenizer=True,
+        tokenizer_hf_path="tokenizer.pkl",
+    )
+    print("Step 1b: Downloading sft-nanochat-d20 checkpoint (step 965)...")
+    stage_download_sft_checkpoint.remote(
+        hf_repo="yoyoliuuu/nanochat-d20-finetuned",
+        checkpoint_name="sft-nanochat-d20",
+        step=965,
+        hf_subfolder="sft-nanochat-d20",
+        dest_base_dir=D20_CACHE,
+    )
+    print("Step 2: Running RL with numeric_distance reward...")
+    stage_rl_d20.remote(
+        run_name="rl-gsm8k-d20-numeric-distance-n",
+        model_tag="sft-nanochat-d20",
+        reward_system="numeric_distance",
+    )
+
+
+@app.local_entrypoint()
+def run_rl_part4_n() -> None:
+    """
+    N's Part 4 RL run: numeric_distance reward shaping on sft-nanochat-d20 (step 965).
+    Downloads checkpoint from yoyoliuuu/nanochat-d20-finetuned, then runs RL on 4x H100.
+    Logs to W&B project nanochat-rl under run name rl-gsm8k-d20-numeric-distance-n.
+    Run: uv run modal run --detach nanochat_modal.py::run_rl_part4_n
+    """
+    stage_rl_part4_n_pipeline.remote()
+
+
+@app.local_entrypoint()
+def push_rl_part4_n() -> None:
+    """
+    Push N's Part 4 RL checkpoint to yoyoliuuu/nanochat-d20-finetuned
+    under the subfolder rl-gsm8k-d20-numeric-distance-n (visible to teammates).
+    Run after training completes:
+        uv run modal run nanochat_modal.py::push_rl_part4_n
+    """
+    stage_push_checkpoint_to_hf.remote(
+        source="rl",
+        model_tag="rl-gsm8k-d20-numeric-distance-n",
+        hf_repo="yoyoliuuu/nanochat-d20-finetuned",
+        hf_folder="rl-gsm8k-d20-numeric-distance-n",
+        source_base_dir=D20_CACHE,
+    )
