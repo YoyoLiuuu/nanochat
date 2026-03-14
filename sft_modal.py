@@ -222,9 +222,50 @@ def run_pipeline() -> None:
     print("\nAll done!")
     print(f"  HF: https://huggingface.co/{HF_REPO}")
 
+@app.function(
+    image=image, secrets=[secret], volumes={VOLUME_MOUNT: volume},
+    gpu=GPU, timeout=60 * 60 * 4,
+)
+def run_remaining() -> None:
+    """SFT enhanced + evals only (pretrain + baseline already on volume)."""
+    _setup_cache()
+    _download_identity_conversations()
+
+    # SFT enhanced
+    print("[1/3] SFT enhanced (+MetaMathQA +OrcaMath +UltraChat)...")
+    _torchrun("scripts.chat_sft", [
+        f"--model-tag={PRETRAIN_MODEL_TAG}",
+        f"--device-batch-size={DEVICE_BATCH_SIZE}",
+        "--run=sft-enhanced-original",
+        f"--metamathqa-size={METAMATHQA_SIZE}",
+        f"--orcamath-size={ORCAMATH_SIZE}",
+        f"--ultrachat-size={ULTRACHAT_SIZE}",
+    ], nproc=NPROC)
+    src = os.path.join(NANOCHAT_CACHE, "chatsft_checkpoints", PRETRAIN_MODEL_TAG)
+    dst = os.path.join(NANOCHAT_CACHE, "chatsft_checkpoints", ENHANCED_SFT_TAG)
+    if os.path.exists(src) and not os.path.exists(dst):
+        os.rename(src, dst)
+    volume.commit()
+
+    # Evals
+    print("[2/3] Eval baseline (GSM8K + SpellingBee + ARC-Easy)...")
+    _torchrun("scripts.chat_eval", [
+        "-i", "sft", f"--model-tag={BASELINE_SFT_TAG}",
+        "-a", "GSM8K|SpellingBee|ARC-Easy",
+    ], nproc=NPROC)
+
+    print("[3/3] Eval enhanced (GSM8K + SpellingBee + ARC-Easy)...")
+    _torchrun("scripts.chat_eval", [
+        "-i", "sft", f"--model-tag={ENHANCED_SFT_TAG}",
+        "-a", "GSM8K|SpellingBee|ARC-Easy",
+    ], nproc=NPROC)
+    volume.commit()
+
+    print("\nAll done!")
+
 @app.local_entrypoint()
 def main() -> None:
-    """Launch pipeline. Use --detach to survive laptop close."""
-    print("Launching d24 original pipeline on 4x H100...")
-    run_pipeline.remote()
+    """Launch remaining pipeline. Use --detach to survive laptop close."""
+    print("Launching SFT enhanced + evals on 8x H100...")
+    run_remaining.remote()
     print("Pipeline complete!")
