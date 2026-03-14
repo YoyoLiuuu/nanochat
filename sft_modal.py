@@ -15,9 +15,9 @@ from modal import App, Image as ModalImage, Volume, Secret
 
 DEPTH = 24
 TARGET_PARAM_DATA_RATIO = 9.5
-NPROC = 4
+NPROC = 8
 DEVICE_BATCH_SIZE = 16
-GPU = "H100:4"
+GPU = "H100:8"
 NUM_DATA_SHARDS = 170
 
 PRETRAIN_MODEL_TAG = "nanochat-d24-original"
