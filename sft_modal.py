@@ -270,12 +270,12 @@ def run_evals() -> None:
     print("[1/2] Eval baseline (GSM8K + SpellingBee + ARC-Easy)...")
     _python("scripts.chat_eval", [
         "-i", "sft", f"--model-tag={BASELINE_SFT_TAG}",
-        "-a", "GSM8K|SpellingBee|ARC-Easy",
+        "-a", "'GSM8K|SpellingBee|ARC-Easy'",
     ])
     print("[2/2] Eval enhanced (GSM8K + SpellingBee + ARC-Easy)...")
     _python("scripts.chat_eval", [
         "-i", "sft", f"--model-tag={ENHANCED_SFT_TAG}",
-        "-a", "GSM8K|SpellingBee|ARC-Easy",
+        "-a", "'GSM8K|SpellingBee|ARC-Easy'",
     ])
     volume.commit()
     print("All evals done!")
