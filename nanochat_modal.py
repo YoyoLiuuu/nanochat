@@ -70,16 +70,16 @@ NUM_SHARDS = 12
 VOLUME_MOUNT = "/vol"
 NANOCHAT_CACHE = f"{VOLUME_MOUNT}/nanochat_cache"
 KARPATHY_D32_CACHE = f"{VOLUME_MOUNT}/karpathy_d32_cache"  # separate base dir for Karpathy's 65K-vocab tokenizer
-D34_CACHE          = f"{VOLUME_MOUNT}/nanochat_d34_cache"   # separate base dir for nanochat-d34 (65K-vocab tokenizer)
+D34_CACHE = f"{VOLUME_MOUNT}/nanochat_d34_cache"  # separate base dir for nanochat-d34 (65K-vocab tokenizer)
 
 # ── Timeouts ──────────────────────────────────────────────────────────────────
-TRAIN_TIMEOUT_SEC  = 60 * 60 * 20  # 20h max for RL runs
-DOWNLOAD_TIMEOUT_SEC = 60 * 60     # 1h for data download
+TRAIN_TIMEOUT_SEC = 60 * 60 * 20  # 20h max for RL runs
+DOWNLOAD_TIMEOUT_SEC = 60 * 60  # 1h for data download
 
 # ── Eval toggle ──────────────────────────────────────────────────────────────
 # CORE metric is expensive (~20-40min). Set to -1 to skip during ablation.
 # val/bpb logged every 250 steps is enough for comparing runs.
-CORE_METRIC_EVERY = -1   # disable mid-training CORE eval to keep runs cheap
+CORE_METRIC_EVERY = -1  # disable mid-training CORE eval to keep runs cheap
 
 # =============================================================================
 # MODAL PRIMITIVES
@@ -97,7 +97,6 @@ secret = Secret.from_name("nanochat-secrets")
 image = (
     ModalImage.from_registry("nvidia/cuda:12.8.1-devel-ubuntu24.04", add_python="3.11")
     .apt_install("git", "build-essential", "curl", "wget", "unzip")
-
     # Copy the nanochat repo (this file's own repo) into the container
     # Modal hashes the directory contents, so changes to gpt.py etc trigger rebuild
     .add_local_dir(
@@ -107,7 +106,6 @@ image = (
         ignore=[".venv", "__pycache__", "*.pyc", ".git", "rustbpe/target", "runs"],
     )
     .workdir("/root/nanochat")
-
     # Install uv and project deps (rustbpe installs as a prebuilt wheel from PyPI)
     .run_commands(
         "curl -LsSf https://astral.sh/uv/install.sh | sh",
@@ -115,18 +113,20 @@ image = (
     )
     .pip_install("uv", "huggingface_hub")
     .run_commands("uv sync --extra gpu --no-install-project")
-
     # Env vars: nanochat reads NANOCHAT_BASE_DIR to find its cache
-    .env({
-        "OMP_NUM_THREADS": "1",
-        "NANOCHAT_BASE_DIR": NANOCHAT_CACHE,
-        "HF_HOME": f"{VOLUME_MOUNT}/hf_cache",
-    })
+    .env(
+        {
+            "OMP_NUM_THREADS": "1",
+            "NANOCHAT_BASE_DIR": NANOCHAT_CACHE,
+            "HF_HOME": f"{VOLUME_MOUNT}/hf_cache",
+        }
+    )
 )
 
 # =============================================================================
 # HELPERS
 # =============================================================================
+
 
 def _python(module: str, args: list | None = None) -> None:
     args = args or []
@@ -134,7 +134,13 @@ def _python(module: str, args: list | None = None) -> None:
     _run(cmd)
 
 
-def _torchrun(module: str, args: list | None = None, *, nproc: int = 1, nanochat_base_dir: str | None = None) -> None:
+def _torchrun(
+    module: str,
+    args: list | None = None,
+    *,
+    nproc: int = 1,
+    nanochat_base_dir: str | None = None,
+) -> None:
     args = args or []
     args_str = (" -- " + " ".join(args)) if args else ""
     env_prefix = f"NANOCHAT_BASE_DIR={nanochat_base_dir} " if nanochat_base_dir else ""
@@ -161,6 +167,7 @@ def _setup_cache() -> None:
 # STAGE 0: DATA DOWNLOAD
 # =============================================================================
 
+
 @app.function(
     image=image,
     secrets=[secret],
@@ -181,6 +188,7 @@ def stage_data(num_shards: int = NUM_SHARDS) -> None:
 # =============================================================================
 # STAGE 1: TOKENIZER
 # =============================================================================
+
 
 @app.function(
     image=image,
@@ -205,6 +213,7 @@ def stage_tokenizer() -> None:
 # =============================================================================
 # STAGE 2: PRETRAIN (parametric — used by all runs)
 # =============================================================================
+
 
 @app.function(
     image=image,
@@ -235,7 +244,9 @@ def stage_pretrain(
     _setup_cache()
     print(f"\n{'='*60}")
     print(f"Nanochat run: {run_name}")
-    print(f"  mlp_type={mlp_type}  rope_base={rope_base}  num_mtp_steps={num_mtp_steps}")
+    print(
+        f"  mlp_type={mlp_type}  rope_base={rope_base}  num_mtp_steps={num_mtp_steps}"
+    )
     print(f"  depth={DEPTH}  seq_len={MAX_SEQ_LEN}  gpu={GPU}")
     print(f"{'='*60}\n")
 
@@ -247,7 +258,7 @@ def stage_pretrain(
             f"--depth={DEPTH}",
             f"--max-seq-len={MAX_SEQ_LEN}",
             f"--device-batch-size={DEVICE_BATCH_SIZE}",
-            f"--window-pattern=SSSL",         # H100 has FA3, sliding window works and is faster
+            f"--window-pattern=SSSL",  # H100 has FA3, sliding window works and is faster
             f"--mlp-type={mlp_type}",
             f"--rope-base={rope_base}",
             f"--num-mtp-steps={num_mtp_steps}",
@@ -255,8 +266,8 @@ def stage_pretrain(
             f"--run={run_name}",
             f"--model-tag={model_tag}",
             f"--core-metric-every={CORE_METRIC_EVERY}",  # skip expensive CORE eval
-            "--save-every=500",             # checkpoint every 500 steps (survive disconnects)
-            "--eval-every=100",             # val/bpb every 100 steps for dense W&B curves
+            "--save-every=500",  # checkpoint every 500 steps (survive disconnects)
+            "--eval-every=100",  # val/bpb every 100 steps for dense W&B curves
         ],
     )
     volume.commit()
@@ -341,6 +352,7 @@ def stage_pretrain(
 # PART 4 RUN 2: SwiGLU + MTP
 # =============================================================================
 
+
 @app.local_entrypoint()
 def run_nanochat_final() -> None:
     """Run 3 seeds of nanochat (depth=12) with SwiGLU + MTP, in parallel on 3x H100."""
@@ -365,6 +377,7 @@ def run_nanochat_final() -> None:
 # PIPELINE ORCHESTRATOR (runs on Modal servers, not locally)
 # =============================================================================
 
+
 @app.function(
     image=image,
     secrets=[secret],
@@ -385,10 +398,10 @@ def run_pipeline(num_shards: int = NUM_SHARDS) -> None:
     """
     _setup_cache()
     wandb_entity = os.environ.get("WANDB_ENTITY", "unknown-entity")
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("Nanochat Part 4 Run 2  |  SwiGLU + MTP  |  3 seeds")
     print(f"W&B entity: {wandb_entity}/nanochat")
-    print("="*60 + "\n")
+    print("=" * 60 + "\n")
 
     # Data and tokenizer already cached from run 1 — skipping those stages.
     print("Launching 3 seeds in parallel on 3x H100...")
@@ -407,14 +420,15 @@ def run_pipeline(num_shards: int = NUM_SHARDS) -> None:
         handle.get()
         print(f"seed{seed} complete.")
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print(f"All done! Check W&B at wandb.ai/{wandb_entity}/nanochat")
-    print("="*60 + "\n")
+    print("=" * 60 + "\n")
 
 
 # =============================================================================
 # MAIN ENTRYPOINT: just submits the pipeline and exits immediately
 # =============================================================================
+
 
 @app.local_entrypoint()
 def main() -> None:
@@ -425,7 +439,9 @@ def main() -> None:
     Monitor at: wandb.ai/<WANDB_ENTITY>/nanochat  or  modal.com/apps
     """
     wandb_entity = os.environ.get("WANDB_ENTITY", "unknown-entity")
-    print("Submitting nanochat SwiGLU+MTP pipeline to Modal (runs server-side, safe to close terminal)...")
+    print(
+        "Submitting nanochat SwiGLU+MTP pipeline to Modal (runs server-side, safe to close terminal)..."
+    )
     run_pipeline.spawn()
     print("Submitted! Monitor at wandb.ai/yoyoliuuu/nanochat")
 
@@ -433,6 +449,7 @@ def main() -> None:
 # =============================================================================
 # PART 3: RL TRAINING ON GSM8K
 # =============================================================================
+
 
 @app.function(
     image=image,
@@ -449,15 +466,29 @@ def stage_download_sft_checkpoint(
 ) -> None:
     """Download SFT checkpoint .pt files from HuggingFace into the Modal volume.
     Pass step=0 to auto-detect the step from common candidates.
-    Pass hf_subfolder="" for repos where files live at the repo root (e.g. karpathy/nanochat-d32)."""
+    Pass hf_subfolder="" for repos where files live at the repo root (e.g. karpathy/nanochat-d32).
+    """
     import urllib.request
+
     dest_dir = f"{NANOCHAT_CACHE}/chatsft_checkpoints/{checkpoint_name}"
     os.makedirs(dest_dir, exist_ok=True)
     subfolder = checkpoint_name if hf_subfolder is None else hf_subfolder
     base_url = f"https://huggingface.co/{hf_repo}/resolve/main/{subfolder}".rstrip("/")
     # Auto-detect step if not specified
     if step == 0:
-        for try_step in [50000, 40000, 32146, 30000, 25000, 20000, 15530, 15000, 10000, 5000]:
+        for try_step in [
+            50000,
+            40000,
+            32146,
+            30000,
+            25000,
+            20000,
+            15530,
+            15000,
+            10000,
+            5000,
+            965
+        ]:
             meta_url = f"{base_url}/meta_{try_step:06d}.json"
             dest_meta = os.path.join(dest_dir, f"meta_{try_step:06d}.json")
             try:
@@ -468,7 +499,9 @@ def stage_download_sft_checkpoint(
             except Exception:
                 if os.path.exists(dest_meta):
                     os.remove(dest_meta)
-        assert step != 0, f"Could not auto-detect step for {checkpoint_name} in {hf_repo}"
+        assert (
+            step != 0
+        ), f"Could not auto-detect step for {checkpoint_name} in {hf_repo}"
     files = [
         f"model_{step:06d}.pt",
         f"meta_{step:06d}.json",
@@ -602,7 +635,8 @@ def stage_rl_d12(
     nanochat_base_dir: str | None = None,
 ) -> None:
     """RL on GSM8K from the nanochat d12 SFT checkpoint, 4x H100.
-    Pass nanochat_base_dir to override NANOCHAT_BASE_DIR (e.g. for checkpoints with a different tokenizer)."""
+    Pass nanochat_base_dir to override NANOCHAT_BASE_DIR (e.g. for checkpoints with a different tokenizer).
+    """
     _setup_cache()
     print(f"\n{'='*60}")
     print(f"RL on GSM8K (d12, 4xH100): {run_name}")
@@ -644,6 +678,7 @@ def stage_rl_d12(
 def _ls_checkpoints() -> None:
     """List all checkpoint files on the volume to diagnose missing .pt files."""
     import glob as _glob
+
     for pattern in [
         f"{NANOCHAT_CACHE}/chatsft_checkpoints/**/*",
         f"{NANOCHAT_CACHE}/base_checkpoints/**/*",
@@ -651,6 +686,7 @@ def _ls_checkpoints() -> None:
         files = _glob.glob(pattern, recursive=True)
         for f in sorted(files):
             print(f)
+
 
 @app.local_entrypoint()
 def ls_checkpoints() -> None:
@@ -668,6 +704,7 @@ def ls_checkpoints() -> None:
 def _peek_eval(run_name: str, step: int = 0, n: int = 5) -> None:
     """Print first n generated texts from an eval log to inspect model output format."""
     import json, os
+
     path = f"{NANOCHAT_CACHE}/chatrl_eval_logs/{run_name}/eval_step_{step:06d}.json"
     if not os.path.exists(path):
         print(f"Not found: {path}")
@@ -682,6 +719,7 @@ def _peek_eval(run_name: str, step: int = 0, n: int = 5) -> None:
         for j, outcome in enumerate(record.get("outcomes", [])[:2]):
             print(f"  Sample {j}: correct={outcome['is_correct']}")
             print(f"  Generated: {repr(outcome['generated_text'][:300])}")
+
 
 @app.local_entrypoint()
 def peek_eval() -> None:
@@ -699,8 +737,8 @@ def run_rl_gsm8k() -> None:
     """
     stage_rl.remote(
         run_name="rl-gsm8k-rep1",
-        model_tag="sft-baseline",     # chatsft_checkpoints/sft-baseline/ on the volume
-        model_step=32146,             # sft-baseline checkpoint step (see a4p2_checkpoints/sft-baseline/meta_032146.json)
+        model_tag="sft-baseline",  # chatsft_checkpoints/sft-baseline/ on the volume
+        model_step=32146,  # sft-baseline checkpoint step (see a4p2_checkpoints/sft-baseline/meta_032146.json)
         num_epochs=1,
         device_batch_size=8,
         examples_per_step=16,
@@ -726,15 +764,15 @@ def run_rl_gsm8k_d12() -> None:
 # =============================================================================
 
 # ── Fill these in before running ─────────────────────────────────────────────
-TEAMMATE_HF_REPO        = "karpathy/nanochat-d32"    # HuggingFace repo
-TEAMMATE_CHECKPOINT     = "nanochat-d32"              # local folder name under chatsft_checkpoints/
-TEAMMATE_STEP           = 650                         # nanochat-d32 step (model_000650.pt)
-TEAMMATE_RUN_NAME       = "rl-gsm8k-karpathy-d32"   # W&B run name + eval log folder
-TEAMMATE_GPU            = "H100:8"                   # 8x H100 for speed
-TEAMMATE_EPOCHS         = 1
-TEAMMATE_DEVICE_BATCH   = 8
-TEAMMATE_EXAMPLES_STEP  = 64
-TEAMMATE_NUM_SAMPLES    = 8
+TEAMMATE_HF_REPO = "karpathy/nanochat-d32"  # HuggingFace repo
+TEAMMATE_CHECKPOINT = "nanochat-d32"  # local folder name under chatsft_checkpoints/
+TEAMMATE_STEP = 650  # nanochat-d32 step (model_000650.pt)
+TEAMMATE_RUN_NAME = "rl-gsm8k-karpathy-d32"  # W&B run name + eval log folder
+TEAMMATE_GPU = "H100:8"  # 8x H100 for speed
+TEAMMATE_EPOCHS = 1
+TEAMMATE_DEVICE_BATCH = 8
+TEAMMATE_EXAMPLES_STEP = 64
+TEAMMATE_NUM_SAMPLES = 8
 TEAMMATE_MAX_NEW_TOKENS = 512
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -866,6 +904,7 @@ def _download_eval_logs(run_name: str, base_dir: str = NANOCHAT_CACHE) -> dict:
 # INFERENCE + HF PUSH
 # =============================================================================
 
+
 @app.function(
     image=image,
     secrets=[secret],
@@ -911,7 +950,11 @@ def stage_download_for_inference(
             if os.path.exists(dest_meta):
                 os.remove(dest_meta)
     if base_step is not None:
-        dl(base_dir, base_url, [f"model_{base_step:06d}.pt", f"meta_{base_step:06d}.json"])
+        dl(
+            base_dir,
+            base_url,
+            [f"model_{base_step:06d}.pt", f"meta_{base_step:06d}.json"],
+        )
     else:
         print("WARNING: could not find base checkpoint on HuggingFace")
 
@@ -939,6 +982,7 @@ def stage_inference(
     max_new_tokens: int = 512,
 ) -> None:
     """Run inference via uv subprocess (torch lives in uv venv, not system Python)."""
+
     def run(source, tag, step):
         step_flag = f"--step={step}" if step else ""
         _run(
@@ -946,6 +990,7 @@ def stage_inference(
             f" --source={source} --model-tag={tag} {step_flag}"
             f" --n={n_examples} --max-new-tokens={max_new_tokens}"
         )
+
     if base_step and base_step > 0:
         print(f"\n{'='*60}\nnanochat-d12 BASE (step {base_step})\n{'='*60}")
         run("base", base_checkpoint_name, base_step)
@@ -968,6 +1013,7 @@ def stage_push_rl_checkpoint(
     """Push a trained RL checkpoint directory to HuggingFace via HTTP API."""
     import glob as _glob
     import urllib.request
+
     hf_token = os.environ.get("HF_TOKEN")
     assert hf_token, "HF_TOKEN not set in secrets"
     rl_dir = f"{NANOCHAT_CACHE}/chatrl_checkpoints/{run_name}"
@@ -987,7 +1033,10 @@ def stage_push_rl_checkpoint(
             upload_url,
             data=data,
             method="POST",
-            headers={"Authorization": f"Bearer {hf_token}", "Content-Type": "application/octet-stream"},
+            headers={
+                "Authorization": f"Bearer {hf_token}",
+                "Content-Type": "application/octet-stream",
+            },
         )
         with urllib.request.urlopen(req) as resp:
             print(f"    HTTP {resp.status}")
@@ -1012,13 +1061,13 @@ def push_rl_to_hf() -> None:
 # =============================================================================
 
 # ── Fill in your HuggingFace destination repo ─────────────────────────────────
-D34_HF_PUSH_REPO   = "yoyoliuuu/nanochat-d34-finetuned" 
+D34_HF_PUSH_REPO = "yoyoliuuu/nanochat-d34-finetuned"
 # ─────────────────────────────────────────────────────────────────────────────
 
-D34_BASE_TAG    = "nanochat-d34"
-D34_BASE_STEP   = 169150
-D34_SFT_RUN     = "sft-nanochat-d34"
-D34_RL_RUN      = "rl-gsm8k-nanochat-d34"
+D34_BASE_TAG = "nanochat-d34"
+D34_BASE_STEP = 169150
+D34_SFT_RUN = "sft-nanochat-d34"
+D34_RL_RUN = "rl-gsm8k-nanochat-d34"
 
 
 @app.function(
@@ -1043,9 +1092,12 @@ def stage_download_base_checkpoint(
     Set download_tokenizer=True to also fetch the tokenizer from the HF repo.
     tokenizer_hf_path is the path to tokenizer.pkl inside the HF repo."""
     import urllib.request
+
     dest_dir = f"{dest_base_dir}/base_checkpoints/{checkpoint_name}"
     os.makedirs(dest_dir, exist_ok=True)
-    base_url = f"https://huggingface.co/{hf_repo}/resolve/main/{hf_subfolder}".rstrip("/")
+    base_url = f"https://huggingface.co/{hf_repo}/resolve/main/{hf_subfolder}".rstrip(
+        "/"
+    )
     repo_root_url = f"https://huggingface.co/{hf_repo}/resolve/main"
     for fname in [f"model_{step:06d}.pt", f"meta_{step:06d}.json"]:
         dest = os.path.join(dest_dir, fname)
@@ -1060,8 +1112,12 @@ def stage_download_base_checkpoint(
         tokenizer_dir = os.path.join(dest_base_dir, "tokenizer")
         os.makedirs(tokenizer_dir, exist_ok=True)
         # derive sibling token_bytes.pt path from tokenizer_hf_path
-        tok_hf_dir = tokenizer_hf_path.rsplit("/", 1)[0] if "/" in tokenizer_hf_path else ""
-        token_bytes_hf_path = f"{tok_hf_dir}/token_bytes.pt" if tok_hf_dir else "token_bytes.pt"
+        tok_hf_dir = (
+            tokenizer_hf_path.rsplit("/", 1)[0] if "/" in tokenizer_hf_path else ""
+        )
+        token_bytes_hf_path = (
+            f"{tok_hf_dir}/token_bytes.pt" if tok_hf_dir else "token_bytes.pt"
+        )
         for local_fname, hf_path in [
             ("tokenizer.pkl", tokenizer_hf_path),
             ("token_bytes.pt", token_bytes_hf_path),
@@ -1101,9 +1157,12 @@ def stage_sft_d34(
     nanochat_base_dir: str = D34_CACHE,
 ) -> None:
     """SFT nanochat-d34 on 4x H100.
-    Loads from base_checkpoints/nanochat-d34/, saves to chatsft_checkpoints/nanochat-d34/."""
+    Loads from base_checkpoints/nanochat-d34/, saves to chatsft_checkpoints/nanochat-d34/.
+    """
     _setup_cache()
-    print(f"\n{'='*60}\nSFT: {run_name}  (base={model_tag} step={model_step})\n{'='*60}\n")
+    print(
+        f"\n{'='*60}\nSFT: {run_name}  (base={model_tag} step={model_step})\n{'='*60}\n"
+    )
     _torchrun(
         "scripts.chat_sft",
         [
@@ -1112,7 +1171,7 @@ def stage_sft_d34(
             f"--model-step={model_step}",
             "--save-every=500",
             "--eval-every=200",
-            "--chatcore-every=-1",   # skip expensive ChatCORE mid-run
+            "--chatcore-every=-1",  # skip expensive ChatCORE mid-run
         ],
         nproc=4,
         nanochat_base_dir=nanochat_base_dir,
@@ -1129,19 +1188,20 @@ def stage_sft_d34(
     timeout=60 * 60,  # 1h — large model files
 )
 def stage_push_checkpoint_to_hf(
-    source: str,           # "sft" | "rl" — determines source subdir
-    model_tag: str,        # folder name inside the source subdir
-    hf_repo: str,          # e.g. "yoyoliuuu/nanochat-d34-finetuned"
-    hf_folder: str,        # folder name inside the HF repo
+    source: str,  # "sft" | "rl" — determines source subdir
+    model_tag: str,  # folder name inside the source subdir
+    hf_repo: str,  # e.g. "yoyoliuuu/nanochat-d34-finetuned"
+    hf_folder: str,  # folder name inside the HF repo
     source_base_dir: str = NANOCHAT_CACHE,  # override for non-default caches (e.g. D34_CACHE)
 ) -> None:
     """Push a checkpoint directory to HuggingFace using huggingface_hub (handles large files)."""
     from huggingface_hub import HfApi
     import glob as _glob
+
     source_dir_map = {
         "base": "base_checkpoints",
-        "sft":  "chatsft_checkpoints",
-        "rl":   "chatrl_checkpoints",
+        "sft": "chatsft_checkpoints",
+        "rl": "chatrl_checkpoints",
     }
     assert source in source_dir_map, f"source must be one of {list(source_dir_map)}"
     ckpt_dir = f"{source_base_dir}/{source_dir_map[source]}/{model_tag}"
@@ -1219,16 +1279,16 @@ def stage_rl_d34(
 )
 def stage_d34_pipeline() -> None:
     """Full d34 pipeline running on Modal servers (safe to --detach):
-      1. Download karpathy/nanochat-d34 base checkpoint
-      2. SFT on 4x H100
-      3. Push SFT checkpoint to HuggingFace
-      4. RL (GRPO on GSM8K) on 4x H100
-      5. Push RL checkpoint to HuggingFace
+    1. Download karpathy/nanochat-d34 base checkpoint
+    2. SFT on 4x H100
+    3. Push SFT checkpoint to HuggingFace
+    4. RL (GRPO on GSM8K) on 4x H100
+    5. Push RL checkpoint to HuggingFace
     """
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("nanochat-d34 pipeline: download → SFT → push → RL → push")
     print(f"HF destination: {D34_HF_PUSH_REPO}")
-    print("="*60 + "\n")
+    print("=" * 60 + "\n")
 
     print("Step 1: Downloading base checkpoint + tokenizer...")
     stage_download_base_checkpoint.remote(
@@ -1260,9 +1320,9 @@ def stage_d34_pipeline() -> None:
         source_base_dir=D34_CACHE,
     )
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print(f"All done! Checkpoints at: https://huggingface.co/{D34_HF_PUSH_REPO}")
-    print("="*60 + "\n")
+    print("=" * 60 + "\n")
 
 
 @app.local_entrypoint()
@@ -1272,9 +1332,12 @@ def run_d34_pipeline() -> None:
     Set D34_HF_PUSH_REPO above first, then:
         uv run modal run --detach nanochat_modal.py::run_d34_pipeline
     """
-    assert D34_HF_PUSH_REPO != "YOUR_HF_USERNAME/nanochat-d34-finetuned", \
-        "Set D34_HF_PUSH_REPO to your HuggingFace repo before running."
-    print("Submitting d34 pipeline to Modal (runs server-side, safe to close terminal)...")
+    assert (
+        D34_HF_PUSH_REPO != "YOUR_HF_USERNAME/nanochat-d34-finetuned"
+    ), "Set D34_HF_PUSH_REPO to your HuggingFace repo before running."
+    print(
+        "Submitting d34 pipeline to Modal (runs server-side, safe to close terminal)..."
+    )
     stage_d34_pipeline.spawn()
     print(f"Submitted! Results will be pushed to: {D34_HF_PUSH_REPO}")
 
@@ -1284,14 +1347,16 @@ def run_d34_pipeline() -> None:
 # =============================================================================
 
 # ── Fill in your HuggingFace destination repo ─────────────────────────────────
-D20_HF_PUSH_REPO   = "yoyoliuuu/nanochat-d20-finetuned"
+D20_HF_PUSH_REPO = "yoyoliuuu/nanochat-d20-finetuned"
 # ─────────────────────────────────────────────────────────────────────────────
 
-D20_CACHE       = f"{VOLUME_MOUNT}/nanochat_d20_cache"   # separate base dir for 65K-vocab tokenizer
-D20_BASE_TAG    = "nanochat-d20"
-D20_BASE_STEP   = 650
-D20_SFT_RUN     = "sft-nanochat-d20"
-D20_RL_RUN      = "rl-gsm8k-nanochat-d20"
+D20_CACHE = (
+    f"{VOLUME_MOUNT}/nanochat_d20_cache"  # separate base dir for 65K-vocab tokenizer
+)
+D20_BASE_TAG = "sft-nanochat-d20"
+D20_BASE_STEP = 650
+D20_SFT_RUN = "sft-nanochat-d20"
+D20_RL_RUN = "rl-gsm8k-nanochat-d20"
 
 
 @app.function(
@@ -1308,9 +1373,12 @@ def stage_sft_d20(
     nanochat_base_dir: str = D20_CACHE,
 ) -> None:
     """SFT sdobson/nanochat-d20 on 4x H100.
-    Loads from base_checkpoints/nanochat-d20/, saves to chatsft_checkpoints/nanochat-d20/."""
+    Loads from base_checkpoints/nanochat-d20/, saves to chatsft_checkpoints/nanochat-d20/.
+    """
     _setup_cache()
-    print(f"\n{'='*60}\nSFT: {run_name}  (base={model_tag} step={model_step})\n{'='*60}\n")
+    print(
+        f"\n{'='*60}\nSFT: {run_name}  (base={model_tag} step={model_step})\n{'='*60}\n"
+    )
     _torchrun(
         "scripts.chat_sft",
         [
@@ -1338,7 +1406,8 @@ def stage_sft_d20(
 )
 def stage_rl_d20(
     run_name: str = D20_RL_RUN,
-    model_tag: str = D20_BASE_TAG,
+    model_tag: str = D20_SFT_RUN,
+    reward_system: str = "baseline",
     num_epochs: int = 1,
     device_batch_size: int = 8,
     examples_per_step: int = 64,
@@ -1350,14 +1419,40 @@ def stage_rl_d20(
     nanochat_base_dir: str = D20_CACHE,
 ) -> None:
     """RL (GRPO) on GSM8K from the d20 SFT checkpoint, 4x H100.
-    Loads from chatsft_checkpoints/nanochat-d20/ (auto-detects last step)."""
+    Loads from chatsft_checkpoints/nanochat-d20/ (auto-detects last step).
+
+    uv run modal run --detach nanochat_modal.py::stage_rl_d20 --reward-system baseline
+    uv run modal run --detach nanochat_modal.py::stage_rl_d20 --reward-system numeric_distance
+    uv run modal run --detach nanochat_modal.py::stage_rl_d20 --reward-system completion_brevity
+    uv run modal run --detach nanochat_modal.py::stage_rl_d20 --reward-system combined
+    """
+    valid_reward_systems = {
+        "baseline",
+        "numeric_distance",
+        "completion_brevity",
+        "combined",
+    }
+    if reward_system not in valid_reward_systems:
+        valid = ", ".join(sorted(valid_reward_systems))
+        raise ValueError(
+            f"Unknown reward_system '{reward_system}'. Valid options: {valid}"
+        )
+
+    run_name_with_reward = run_name
+    reward_suffix = f"-{reward_system}"
+    if not run_name_with_reward.endswith(reward_suffix):
+        run_name_with_reward = f"{run_name_with_reward}{reward_suffix}"
+
     _setup_cache()
-    print(f"\n{'='*60}\nRL: {run_name}  (sft={model_tag})\n{'='*60}\n")
+    print(
+        f"\n{'='*60}\nRL: {run_name_with_reward}  (sft={model_tag}, reward={reward_system})\n{'='*60}\n"
+    )
     _torchrun(
         "scripts.chat_rl",
         [
-            f"--run={run_name}",
+            f"--run={run_name_with_reward}",
             f"--model-tag={model_tag}",
+            f"--reward-system={reward_system}",
             f"--num-epochs={num_epochs}",
             f"--device-batch-size={device_batch_size}",
             f"--examples-per-step={examples_per_step}",
@@ -1371,7 +1466,7 @@ def stage_rl_d20(
         nanochat_base_dir=nanochat_base_dir,
     )
     volume.commit()
-    print(f"RL done: {run_name}")
+    print(f"RL done: {run_name_with_reward}")
 
 
 @app.function(
@@ -1383,16 +1478,16 @@ def stage_rl_d20(
 )
 def stage_d20_pipeline() -> None:
     """Full d20 pipeline running on Modal servers (safe to --detach):
-      1. Download sdobson/nanochat base checkpoint + tokenizer
-      2. SFT on 4x H100
-      3. Push SFT checkpoint to HuggingFace
-      4. RL (GRPO on GSM8K) on 4x H100
-      5. Push RL checkpoint to HuggingFace
+    1. Download sdobson/nanochat base checkpoint + tokenizer
+    2. SFT on 4x H100
+    3. Push SFT checkpoint to HuggingFace
+    4. RL (GRPO on GSM8K) on 4x H100
+    5. Push RL checkpoint to HuggingFace
     """
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("nanochat-d20 pipeline: download → SFT → push → RL → push")
     print(f"HF destination: {D20_HF_PUSH_REPO}")
-    print("="*60 + "\n")
+    print("=" * 60 + "\n")
 
     print("Step 1: Downloading base checkpoint + tokenizer...")
     stage_download_base_checkpoint.remote(
@@ -1418,7 +1513,10 @@ def stage_d20_pipeline() -> None:
     )
 
     print("Step 4: RL (GRPO) on 4x H100...")
-    stage_rl_d20.remote(nanochat_base_dir=D20_CACHE)
+    stage_rl_d20.remote(
+        model_tag=D20_SFT_RUN,
+        nanochat_base_dir=D20_CACHE,
+    )
 
     print("Step 5: Pushing RL checkpoint to HuggingFace...")
     stage_push_checkpoint_to_hf.remote(
@@ -1428,6 +1526,7 @@ def stage_d20_pipeline() -> None:
         hf_folder="rl-gsm8k-nanochat-d20",
         source_base_dir=D20_CACHE,
     )
+
 
 
 # =============================================================================
@@ -1479,9 +1578,9 @@ def eval_d20_rl() -> None:
     """
     stage_eval_d20_rl.remote(step=115)
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print(f"All done! Checkpoints at: https://huggingface.co/{D20_HF_PUSH_REPO}")
-    print("="*60 + "\n")
+    print("=" * 60 + "\n")
 
 
 @app.local_entrypoint()
@@ -1491,8 +1590,11 @@ def run_d20_pipeline() -> None:
     Set D20_HF_PUSH_REPO above first, then:
         uv run modal run --detach nanochat_modal.py::run_d20_pipeline
     """
-    assert D20_HF_PUSH_REPO != "YOUR_HF_USERNAME/nanochat-d20-finetuned", \
-        "Set D20_HF_PUSH_REPO to your HuggingFace repo before running."
-    print("Submitting d20 pipeline to Modal (runs server-side, safe to close terminal)...")
+    assert (
+        D20_HF_PUSH_REPO != "YOUR_HF_USERNAME/nanochat-d20-finetuned"
+    ), "Set D20_HF_PUSH_REPO to your HuggingFace repo before running."
+    print(
+        "Submitting d20 pipeline to Modal (runs server-side, safe to close terminal)..."
+    )
     stage_d20_pipeline.spawn()
     print(f"Submitted! Results will be pushed to: {D20_HF_PUSH_REPO}")
