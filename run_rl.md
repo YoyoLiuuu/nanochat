@@ -1,7 +1,7 @@
-# RL Training Instructions (CSC490 A4P3)
+# D20 Pipeline Instructions
 
-This guide is for the **teammate running the RL training** after completing SFT.
-After training finishes, the repo owner will pull the eval logs and do the full analysis.
+Runs the full pipeline: download → SFT → push → RL → push.
+Base model: `sdobson/nanochat` (d20, 65K vocab, step 650).
 
 ---
 
@@ -10,8 +10,7 @@ After training finishes, the repo owner will pull the eval logs and do the full 
 You need access to:
 - This GitHub repo (clone it)
 - The shared Modal workspace (`nanochat-ablation` app, `nanochat-vol` volume)
-- The shared W&B project `nanochat-rl` under `yoyoliuuu`
-- The shared HuggingFace repo `alvina-yang/csc490a4p2` (write access)
+- A HuggingFace repo to push results to (create one at huggingface.co)
 
 Install dependencies:
 ```bash
@@ -27,153 +26,109 @@ uv run wandb login          # paste your W&B API key
 
 ---
 
-## Step 1 — Upload your SFT checkpoint to HuggingFace
+## Step 1 — Set your HuggingFace destination repo
 
-Your SFT training saves checkpoints as:
-```
-model_<step>.pt
-meta_<step>.json
-```
-
-Upload **both files** to `alvina-yang/csc490a4p2` under a folder named `sft-teammate` (or any short name without spaces):
-
-```
-alvina-yang/csc490a4p2/
-└── sft-teammate/
-    ├── model_XXXXXX.pt
-    └── meta_XXXXXX.json
-```
-
-You can upload via the HuggingFace web UI or CLI:
-```bash
-pip install huggingface_hub
-huggingface-cli upload alvina-yang/csc490a4p2 ./path/to/model_XXXXXX.pt sft-teammate/model_XXXXXX.pt
-huggingface-cli upload alvina-yang/csc490a4p2 ./path/to/meta_XXXXXX.json sft-teammate/meta_XXXXXX.json
-```
-
----
-
-## Step 2 — Configure the RL run
-
-Open `nanochat_modal.py` and find the `TEAMMATE_*` block (around line 655):
+Open `nanochat_modal.py` and find the `D20_HF_PUSH_REPO` constant (around line 1220):
 
 ```python
-TEAMMATE_HF_REPO        = "alvina-yang/csc490a4p2"   # HuggingFace repo
-TEAMMATE_CHECKPOINT     = "sft-teammate"              # ← folder name you used above
-TEAMMATE_STEP           = None                        # ← set to your step number (e.g. 28000), or leave None to auto-detect
-TEAMMATE_RUN_NAME       = "rl-gsm8k-teammate"        # W&B run name (keep this as-is)
-TEAMMATE_GPU            = "H100:4"                   # 4x H100 recommended
-TEAMMATE_EPOCHS         = 1
-TEAMMATE_DEVICE_BATCH   = 8
-TEAMMATE_EXAMPLES_STEP  = 64
-TEAMMATE_NUM_SAMPLES    = 8
-TEAMMATE_MAX_NEW_TOKENS = 512
+D20_HF_PUSH_REPO = "YOUR_HF_USERNAME/nanochat-d20-finetuned"
 ```
 
-Set `TEAMMATE_CHECKPOINT` to match the folder name you used in Step 1.
-Set `TEAMMATE_STEP` to the exact step number (e.g. `28000`), or leave as `None` to auto-detect.
+Replace with your actual HuggingFace repo (it will be created automatically if it doesn't exist).
 
 ---
 
-## Step 3 — Launch training (detached)
+## Step 2 — Launch the pipeline (detached)
 
 ```bash
-uv run modal run --detach nanochat_modal.py::run_rl_teammate
+uv run modal run --detach nanochat_modal.py::run_d20_pipeline
 ```
 
-This will:
-1. Download your SFT checkpoint from HuggingFace to the Modal volume
-2. Start RL training on 4x H100 GPUs (~1 hour)
-3. Return immediately — safe to close your terminal
+This runs entirely on Modal servers — safe to close your terminal. It will:
+1. Download `sdobson/nanochat` base checkpoint + tokenizer to the Modal volume
+2. SFT on 4x H100 (~6–8h)
+3. Push SFT checkpoint to `YOUR_HF_REPO/sft-nanochat-d20/`
+4. RL (GRPO on GSM8K) on 4x H100 (~1h)
+5. Push RL checkpoint to `YOUR_HF_REPO/rl-gsm8k-nanochat-d20/`
 
 **Monitor progress:**
-- W&B: https://wandb.ai/yoyoliuuu/nanochat-rl  (run name: `rl-gsm8k-teammate`)
+- W&B: https://wandb.ai — project `nanochat-sft` (SFT) and `nanochat-rl` (RL)
 - Modal: https://modal.com/apps
+
+---
+
+## Re-running individual stages
+
+If a stage fails, you can re-run it standalone without restarting the whole pipeline:
+
+```bash
+# Re-run just the download (idempotent — skips already-cached files)
+uv run modal run nanochat_modal.py::stage_download_base_checkpoint
+
+# Re-run just SFT
+uv run modal run nanochat_modal.py::stage_sft_d20
+
+# Push SFT checkpoint to HuggingFace
+uv run modal run nanochat_modal.py::stage_push_checkpoint_to_hf \
+  --source sft \
+  --model-tag nanochat-d20 \
+  --hf-repo YOUR_HF_REPO \
+  --hf-folder sft-nanochat-d20 \
+  --source-base-dir /vol/nanochat_d20_cache
+
+# Re-run just RL
+uv run modal run nanochat_modal.py::stage_rl_d20
+
+# Push RL checkpoint to HuggingFace
+uv run modal run nanochat_modal.py::stage_push_checkpoint_to_hf \
+  --source rl \
+  --model-tag nanochat-d20 \
+  --hf-repo YOUR_HF_REPO \
+  --hf-folder rl-gsm8k-nanochat-d20 \
+  --source-base-dir /vol/nanochat_d20_cache
+```
+
+Check what checkpoints are saved on the volume:
+```bash
+uv run modal run nanochat_modal.py::ls_checkpoints
+```
 
 ---
 
 ## What gets logged
 
-### W&B (live during training)
+### SFT (W&B project: `nanochat-sft`)
 | Metric | Description |
 |---|---|
-| `reward` | Mean reward per step (fraction of correct answers across all rollouts) |
-| `sequence_length` | Mean generated sequence length per step |
-| `pass@1` … `pass@8` | Fraction of eval problems solved with k attempts (logged every 60 steps) |
-| `examples` | W&B Table of 10 sample questions, model outputs, and correctness (every 60 steps) |
+| `val/bpb` | Validation bits-per-byte (lower = better) |
+| `train/loss` | Training loss |
 | `lrm` | Learning rate multiplier |
 
-### Modal volume (JSON files for EDA)
-Saved to `/vol/nanochat_cache/chatrl_eval_logs/rl-gsm8k-teammate/`:
-```
-eval_step_000000.json   ← before any training (baseline)
-eval_step_000060.json
-eval_step_000120.json
-...
-```
+Checkpoints saved every 500 steps to `/vol/nanochat_d20_cache/chatsft_checkpoints/nanochat-d20/`.
 
-Each JSON contains:
-```json
-{
-  "step": 60,
-  "pass@k": {"pass@1": 0.05, "pass@2": 0.08, ...},
-  "records": [
-    {
-      "idx": 0,
-      "question": "Janet's ducks lay 16 eggs per day...",
-      "reference": "...\n#### 18",
-      "outcomes": [
-        {"is_correct": 0, "generated_text": "...#### 12"},
-        {"is_correct": 1, "generated_text": "...#### 18"},
-        ...
-      ]
-    },
-    ...
-  ]
-}
-```
+### RL (W&B project: `nanochat-rl`)
+| Metric | Description |
+|---|---|
+| `reward` | Mean reward per step (fraction of correct answers) |
+| `pass@1` … `pass@8` | Fraction of GSM8K problems solved with k attempts |
+| `sequence_length` | Mean generated sequence length |
+| `examples` | W&B Table of sample questions + model outputs |
 
-### RL checkpoints
-Saved to `/vol/nanochat_cache/chatrl_checkpoints/rl-gsm8k-teammate/` every 60 steps.
-
----
-
-## Step 4 — After training completes
-
-Tell the repo owner training is done. They will run:
-
-```bash
-# Download eval logs locally for EDA
-uv run modal run nanochat_modal.py::download_eval_logs
-
-# Push the trained RL checkpoint to HuggingFace
-uv run modal run nanochat_modal.py::push_rl_to_hf
-```
+Checkpoints saved every 60 steps to `/vol/nanochat_d20_cache/chatrl_checkpoints/nanochat-d20/`.
 
 ---
 
 ## Troubleshooting
 
-**"No checkpoints found"** — The `.pt` file wasn't found on the Modal volume.
-→ Check that the HuggingFace upload completed and re-run `run_rl_teammate` (it will re-download).
+**`ModuleNotFoundError: huggingface_hub`** — Image needs a rebuild. Just re-run, Modal will rebuild automatically.
 
-**"All rewards are 0.0"** — The model isn't outputting `#### <number>` format.
-→ Verify your SFT training used GSM8K data and the model learned to write `#### answer` at the end.
-→ Check a few examples: `uv run modal run nanochat_modal.py::peek_eval`
+**`No checkpoints found`** — The push stage can't find `.pt` files. Run `ls_checkpoints` to verify they exist on the volume.
 
-**Job disappeared from Modal** — Timeout or preemption.
-→ Check https://modal.com/apps for the exit reason. Re-run with `--detach`.
+**OOM during SFT** — The d20 model uses 65K vocab. `device-batch-size=8` is already set; if still OOM try reducing further in `stage_sft_d20`.
 
-**Pass@k not improving after 60+ steps** — Model too small or SFT init too weak.
-→ This is a valid finding to report in the analysis. Let the run finish.
+**Job disappeared from Modal** — Timeout or preemption. Check https://modal.com/apps for the exit reason. Re-run the individual stage that failed.
 
----
-
-## Expected results
-
-For reference, Karpathy's original run (from nanochat discussions):
-- Pass@1 reaches ~10–15% after 1 epoch on a well-initialized model
-- Reward curve shows gradual increase over training
-- Sequence length may increase then stabilize as model learns to reason before answering
-
-Your results will depend on model size and SFT quality. Differences are expected and should be discussed in the writeup.
+**All RL rewards are 0.0** — Model isn't outputting `#### <number>` format. SFT may not have trained long enough or the GSM8K data wasn't included. Check a few examples:
+```bash
+uv run modal run nanochat_modal.py::peek_eval
+```

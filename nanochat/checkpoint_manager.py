@@ -27,6 +27,11 @@ def _patch_missing_config_keys(model_config_kwargs):
         model_config_kwargs["window_pattern"] = "L"
         log0(f"Patching missing window_pattern in model config to 'L'")
 
+def _has_ve(layer_idx, n_layer):
+    """Mirror of gpt.py has_ve: alternating layers, last layer always included."""
+    return layer_idx % 2 == (n_layer - 1) % 2
+
+
 def _patch_missing_keys(model_data, model_config):
     """Add default values for new parameters that may be missing in old checkpoints."""
     n_layer = model_config.n_layer
@@ -38,6 +43,23 @@ def _patch_missing_keys(model_data, model_config):
     if "x0_lambdas" not in model_data:
         model_data["x0_lambdas"] = torch.zeros(n_layer)
         log0(f"Patching missing x0_lambdas in model data to 0.0")
+    # value_embeds and ve_gate: added in ResFormer update; old checkpoints lack them.
+    # Zero-init so they have no effect on the loaded weights until trained.
+    ve_layer_indices = [i for i in range(n_layer) if _has_ve(i, n_layer)]
+    head_dim = model_config.n_embd // model_config.n_head
+    kv_dim = model_config.n_kv_head * head_dim
+    vocab_size = model_config.vocab_size
+    padded_vocab_size = vocab_size + (64 - vocab_size % 64) % 64
+    ve_gate_channels = 32  # hardcoded in Attn.__init__
+    for i in ve_layer_indices:
+        ve_key = f"value_embeds.{i}.weight"
+        if ve_key not in model_data:
+            model_data[ve_key] = torch.zeros(padded_vocab_size, kv_dim)
+            log0(f"Patching missing {ve_key} to zeros")
+        gate_key = f"transformer.h.{i}.attn.ve_gate.weight"
+        if gate_key not in model_data:
+            model_data[gate_key] = torch.zeros(model_config.n_kv_head, ve_gate_channels)
+            log0(f"Patching missing {gate_key} to zeros")
 
 def save_checkpoint(checkpoint_dir, step, model_data, optimizer_data, meta_data, rank=0):
     if rank == 0:
@@ -105,6 +127,9 @@ def build_model(checkpoint_dir, step, device, phase):
     log0(f"Building model with config: {model_config_kwargs}")
     model_config = GPTConfig(**model_config_kwargs)
     _patch_missing_keys(model_data, model_config)
+    # Ensure all tensors are on the target device and share the checkpoint dtype (patched zeros default to float32)
+    ckpt_dtype = next((v.dtype for v in model_data.values() if v.is_floating_point()), torch.bfloat16)
+    model_data = {k: v.to(device=device, dtype=ckpt_dtype) if v.is_floating_point() else v.to(device) for k, v in model_data.items()}
     with torch.device("meta"):
         model = GPT(model_config)
     # Load the model state
